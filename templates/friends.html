@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block container_class %}container wide{% endblock %}
+{% block content %}
+<h2>My Friends</h2>
+
+<form method="GET" action="/friends">
+    <input type="text" name="search" placeholder="Search username...">
+    <button type="submit">Search</button>
+</form>
+
+{% if search_results %}
+    <h3>Search Results</h3>
+    {% for user in search_results %}
+    <div class="friend-card">
+        <span class="name">{{ user.username }}</span>
+        <div class="actions">
+            <form method="POST" action="/add_friend/{{ user.id }}">
+                <button type="submit">Add Friend</button>
+            </form>
+        </div>
+    </div>
+    {% endfor %}
+{% endif %}
+
+<h3>Your Friends</h3>
+{% for friend in friends %}
+    <div class="friend-card">
+        <span class="name">{{ friend.username }}</span>
+        <div class="actions">
+            <a href="/chat/{{ friend.id }}">Chat</a>
+            <form method="POST" action="/unfriend/{{ friend.id }}">
+                <button type="submit">Unfriend</button>
+            </form>
+        </div>
+    </div>
+{% else %}
+    <p>No friends yet — search above to add some!</p>
+{% endfor %}
+{% endblock %}

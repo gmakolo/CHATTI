@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block container_class %}container wide{% endblock %}
+{% block content %}
+<h2>Chat with {{ friend.username }}</h2>
+
+<div class="chat-box" id="chat-box">
+    {% for message in messages %}
+        {% if message.sender_id == current_user_id %}
+            <div class="bubble sent">
+                {{ message.content }}
+                <div class="bubble-time">{{ message.timestamp.strftime('%I:%M %p') if message.timestamp else '' }}</div>
+            </div>
+        {% else %}
+            <div class="bubble received">
+                {{ message.content }}
+                <div class="bubble-time">{{ message.timestamp.strftime('%I:%M %p') if message.timestamp else '' }}</div>
+            </div>
+        {% endif %}
+    {% endfor %}
+</div>
+
+<form method="POST" action="/send_message/{{ friend.id }}" class="chat-form">
+    <input type="text" name="content" placeholder="Type a message..." required>
+    <button type="submit">Send</button>
+</form>
+
+<p><a href="/friends">Back to Friends</a></p>
+
+<script>
+const friendId = {{ friend.id }};
+const chatBox = document.getElementById("chat-box");
+
+function loadMessages() {
+    fetch(`/messages/${friendId}`)
+        .then(response => response.json())
+        .then(messages => {
+            chatBox.innerHTML = "";
+            messages.forEach(msg => {
+                const bubble = document.createElement("div");
+                bubble.className = "bubble " + (msg.is_mine ? "sent" : "received");
+                bubble.innerHTML = msg.content + '<div class="bubble-time">' + msg.time + '</div>';
+                chatBox.appendChild(bubble);
+            });
+            chatBox.scrollTop = chatBox.scrollHeight;
+        });
+}
+
+setInterval(loadMessages, 3000);
+</script>
+{% endblock %}

@@ -2,11 +2,33 @@
 <html>
 <head>
     <title>CHATTI</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
-    <div class="container">
-        {% block content %}{% endblock %}
+    {% if session.user_id %}
+    <nav class="navbar">
+        <span class="logo">CHATTI</span>
+        <div class="nav-links">
+            <a href="/">Home</a>
+            <a href="/friends">Friends</a>
+            <a href="/logout">Log out</a>
+        </div>
+    </nav>
+    {% endif %}
+
+    <div class="page-wrapper">
+        <div class="{% block container_class %}container{% endblock %}">
+            {% with messages = get_flashed_messages(with_categories=true) %}
+                {% if messages %}
+                    {% for category, message in messages %}
+                        <div class="flash flash-{{ category }}">{{ message }}</div>
+                    {% endfor %}
+                {% endif %}
+            {% endwith %}
+            {% block content %}{% endblock %}
+        </div>
     </div>
 </body>
 </html>
