@@ -1,39 +1,74 @@
 {% extends "base.html" %}
-{% block container_class %}container wide{% endblock %}
+
 {% block content %}
-<h2>My Friends</h2>
 
-<form method="GET" action="/friends">
-    <input type="text" name="search" placeholder="Search username...">
-    <button type="submit">Search</button>
-</form>
+<div class="chat-layout">
 
-{% if search_results %}
-    <h3>Search Results</h3>
-    {% for user in search_results %}
-    <div class="friend-card">
-        <span class="name">{{ user.username }}</span>
-        <div class="actions">
-            <form method="POST" action="/add_friend/{{ user.id }}">
-                <button type="submit">Add Friend</button>
-            </form>
-        </div>
+    <!-- LEFT SIDEBAR -->
+    <div class="sidebar">
+
+        <h2>Chats</h2>
+
+        {% if friends|length == 0 %}
+            <p style="opacity:0.6;">No friends yet</p>
+        {% endif %}
+
+        {% for friend in friends %}
+        <a href="/chat/{{ friend.id }}" class="chat-user">
+
+            <!-- PROFILE PICTURE (real avatar system) -->
+            <div class="avatar">
+
+                {% if friend.avatar_url %}
+                    <img src="{{ friend.avatar_url }}" alt="avatar">
+                {% else %}
+                    {{ friend.username[0].upper() }}
+                {% endif %}
+
+            </div>
+
+            <div class="user-info">
+
+                <div class="name-row">
+                    <span>{{ friend.username }}</span>
+
+                    {% if friend.id in online_users %}
+                        <span class="status-dot online"></span>
+                    {% else %}
+                        <span class="status-dot offline"></span>
+                    {% endif %}
+                </div>
+
+                <small class="preview">Tap to chat 💬</small>
+            </div>
+
+        </a>
+        {% endfor %}
+
     </div>
-    {% endfor %}
-{% endif %}
 
-<h3>Your Friends</h3>
-{% for friend in friends %}
-    <div class="friend-card">
-        <span class="name">{{ friend.username }}</span>
-        <div class="actions">
-            <a href="/chat/{{ friend.id }}">Chat</a>
-            <form method="POST" action="/unfriend/{{ friend.id }}">
-                <button type="submit">Unfriend</button>
+    <!-- RIGHT PANEL -->
+    <div class="main-panel">
+
+        <div class="container">
+
+            <h3>Welcome 👋</h3>
+            <p>Select a chat to start messaging</p>
+
+            <form method="POST" action="/add_friend" class="add-friend-form">
+                <input type="text" name="username" placeholder="Add a friend by username"
+                       autocomplete="off" required>
+                <button type="submit">Add</button>
             </form>
+
+            <div style="margin-top:20px; opacity:0.7;">
+                💡 Tip: online users show a glowing pink-blue dot
+            </div>
+
         </div>
+
     </div>
-{% else %}
-    <p>No friends yet — search above to add some!</p>
-{% endfor %}
+
+</div>
+
 {% endblock %}

@@ -1,50 +1,197 @@
 {% extends "base.html" %}
-{% block container_class %}container wide{% endblock %}
-{% block content %}
-<h2>Chat with {{ friend.username }}</h2>
 
-<div class="chat-box" id="chat-box">
-    {% for message in messages %}
-        {% if message.sender_id == current_user_id %}
-            <div class="bubble sent">
-                {{ message.content }}
-                <div class="bubble-time">{{ message.timestamp.strftime('%I:%M %p') if message.timestamp else '' }}</div>
-            </div>
-        {% else %}
-            <div class="bubble received">
-                {{ message.content }}
-                <div class="bubble-time">{{ message.timestamp.strftime('%I:%M %p') if message.timestamp else '' }}</div>
-            </div>
+{% block content %}
+
+<div class="chat-layout">
+
+    <!-- LEFT SIDEBAR -->
+    <div class="sidebar">
+
+        <h2>Chats</h2>
+
+        {% if friends|length == 0 %}
+            <p style="opacity:0.6;">No friends yet</p>
         {% endif %}
-    {% endfor %}
+
+        {% for f in friends %}
+        <a href="/chat/{{ f.id }}" class="chat-user{% if f.id == friend.id %} active{% endif %}">
+
+            <div class="avatar">
+                {% if f.avatar_url %}
+                    <img src="{{ f.avatar_url }}" alt="">
+                {% else %}
+                    {{ f.username[0].upper() }}
+                {% endif %}
+            </div>
+
+            <div class="user-info">
+                <div class="name-row">
+                    <span>{{ f.username }}</span>
+                    <span class="status-dot {{ 'online' if f.id in online_users else 'offline' }}"
+                          data-user-id="{{ f.id }}"></span>
+                </div>
+            </div>
+
+        </a>
+        {% endfor %}
+
+    </div>
+
+    <!-- RIGHT PANEL -->
+    <div class="main-panel">
+
+        <div class="container">
+
+            <div class="chat-header">
+                <a href="/friends" class="back-link" title="All chats">&#8249;</a>
+
+                <div class="avatar chat-avatar">
+                    {% if friend.avatar_url %}
+                        <img src="{{ friend.avatar_url }}" alt="">
+                    {% else %}
+                        {{ friend.username[0].upper() }}
+                    {% endif %}
+                </div>
+
+                <div class="chat-header-info">
+                    <strong>{{ friend.username }}</strong>
+                    <span class="status-dot {{ 'online' if friend.id in online_users else 'offline' }}"
+                          data-user-id="{{ friend.id }}"></span>
+                    <div class="typing-indicator" id="typing-indicator"></div>
+                </div>
+            </div>
+
+            <div class="chat-box" id="chat-box">
+                {% for m in messages %}
+                <div class="bubble {{ 'sent' if m.sender_id == current_user_id else 'received' }}"
+                     title="{{ m.timestamp.strftime('%H:%M') if m.timestamp else '' }}">{{ m.content }}</div>
+                {% endfor %}
+            </div>
+
+            <form class="chat-form" id="chat-form">
+                <button type="button" id="emojiBtn" title="Emoji">&#128516;</button>
+                <input type="text" id="messageInput" placeholder="Type a message..."
+                       autocomplete="off" maxlength="2000" required>
+                <button type="submit" id="sendBtn">Send</button>
+            </form>
+
+        </div>
+
+    </div>
+
 </div>
 
-<form method="POST" action="/send_message/{{ friend.id }}" class="chat-form">
-    <input type="text" name="content" placeholder="Type a message..." required>
-    <button type="submit">Send</button>
-</form>
+{% endblock %}
 
-<p><a href="/friends">Back to Friends</a></p>
-
+{% block scripts %}
+<script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@joeattardi/emoji-button@4.6.4/dist/index.min.js"></script>
 <script>
-const friendId = {{ friend.id }};
-const chatBox = document.getElementById("chat-box");
+const socket = io();
 
-function loadMessages() {
-    fetch(`/messages/${friendId}`)
-        .then(response => response.json())
-        .then(messages => {
-            chatBox.innerHTML = "";
-            messages.forEach(msg => {
-                const bubble = document.createElement("div");
-                bubble.className = "bubble " + (msg.is_mine ? "sent" : "received");
-                bubble.innerHTML = msg.content + '<div class="bubble-time">' + msg.time + '</div>';
-                chatBox.appendChild(bubble);
-            });
-            chatBox.scrollTop = chatBox.scrollHeight;
-        });
+const friendId = {{ friend.id }};
+const currentUserId = {{ current_user_id }};
+
+const chatBox = document.getElementById("chat-box");
+const form = document.getElementById("chat-form");
+const input = document.getElementById("messageInput");
+const typingBox = document.getElementById("typing-indicator");
+
+// =====================
+// JOIN ROOM
+// =====================
+socket.emit("join", { friend_id: friendId });
+
+// =====================
+// RECEIVE MESSAGE
+// =====================
+function addBubble(content, mine) {
+    const div = document.createElement("div");
+    div.className = "bubble " + (mine ? "sent" : "received");
+    div.textContent = content;   // textContent, not innerHTML -> no XSS
+    chatBox.appendChild(div);
+    chatBox.scrollTop = chatBox.scrollHeight;
 }
 
-setInterval(loadMessages, 3000);
+socket.on("receive_message", (data) => {
+    addBubble(data.content, data.sender_id === currentUserId);
+});
+
+// =====================
+// SEND MESSAGE
+// =====================
+form.addEventListener("submit", (e) => {
+    e.preventDefault();
+
+    const text = input.value.trim();
+    if (!text) return;
+
+    socket.emit("send_message", {
+        friend_id: friendId,
+        content: text
+    });
+
+    input.value = "";
+    stopTyping();
+});
+
+// =====================
+// TYPING
+// =====================
+let typingTimeout = null;
+
+function stopTyping() {
+    clearTimeout(typingTimeout);
+    typingTimeout = null;
+    socket.emit("stop_typing", { friend_id: friendId });
+}
+
+input.addEventListener("input", () => {
+    socket.emit("typing", { friend_id: friendId });
+
+    clearTimeout(typingTimeout);
+    typingTimeout = setTimeout(stopTyping, 1200);
+});
+
+socket.on("typing", (data) => {
+    if (data.user !== currentUserId) {
+        typingBox.innerText = "typing...";
+    }
+});
+
+socket.on("stop_typing", () => {
+    typingBox.innerText = "";
+});
+
+// =====================
+// ONLINE STATUS
+// =====================
+socket.on("user_status", (data) => {
+    const dots = document.querySelectorAll(`.status-dot[data-user-id="${data.user_id}"]`);
+
+    dots.forEach((dot) => {
+        dot.classList.toggle("online", data.status === "online");
+        dot.classList.toggle("offline", data.status === "offline");
+    });
+});
+
+// =====================
+// EMOJI PICKER
+// =====================
+// Guarded: if the CDN is blocked the rest of the chat still works.
+if (typeof EmojiButton !== "undefined") {
+    const picker = new EmojiButton({ position: "top-end" });
+    const emojiBtn = document.getElementById("emojiBtn");
+
+    emojiBtn.addEventListener("click", () => picker.togglePicker(emojiBtn));
+
+    picker.on("emoji", (emoji) => {
+        input.value += emoji;
+        input.focus();
+    });
+}
+
+// Land at the newest message on load.
+chatBox.scrollTop = chatBox.scrollHeight;
 </script>
 {% endblock %}

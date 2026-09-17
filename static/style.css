@@ -1,13 +1,15 @@
+/* ======================
+   GLOBAL RESET
+====================== */
 * {
     box-sizing: border-box;
 }
 
 body {
-    font-family: 'Poppins', Arial, sans-serif;
     margin: 0;
+    font-family: 'Poppins', Arial, sans-serif;
     min-height: 100vh;
 
-    /* 💗💙 Pink + Blue Gradient Background */
     background: linear-gradient(
         135deg,
         #ffb6c1 0%,
@@ -19,138 +21,189 @@ body {
     background-attachment: fixed;
 }
 
-/* Navbar */
+/* ======================
+   NAVBAR
+====================== */
 .navbar {
-    background: rgba(74, 118, 168, 0.9);
-    backdrop-filter: blur(10px);
-    color: white;
-    padding: 15px 30px;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 60px;
+
     display: flex;
     justify-content: space-between;
     align-items: center;
+
+    padding: 0 20px;
+    background: rgba(0,0,0,0.7);
+    color: white;
+    z-index: 1000;
 }
 
 .navbar .logo {
     font-weight: 600;
-    font-size: 1.3em;
-    letter-spacing: 1px;
 }
 
 .navbar .nav-links a {
     color: white;
+    margin-left: 15px;
     text-decoration: none;
-    margin-left: 20px;
 }
 
-.navbar .nav-links a:hover {
-    text-decoration: underline;
+/* ======================
+   APP WRAPPER
+====================== */
+.app-wrapper {
+    padding-top: 70px;
 }
 
-/* Page layout */
-.page-wrapper {
+/* ======================
+   AUTH (LOGIN / SIGNUP CENTER)
+====================== */
+.auth-page {
+    min-height: 100vh;
     display: flex;
     justify-content: center;
-    padding: 40px 20px;
+    align-items: center;
 }
 
-/* Cards (glass effect) */
-.container,
-.container.wide {
-    background: rgba(255, 255, 255, 0.85);
-    backdrop-filter: blur(12px);
-    padding: 30px 40px;
+.auth-card {
+    width: 340px;
+    background: rgba(255,255,255,0.9);
+    padding: 25px;
     border-radius: 12px;
-    box-shadow: 0 10px 30px rgba(0,0,0,0.15);
-}
-
-/* small card */
-.container {
-    width: 320px;
-}
-
-/* wide chat layout */
-.container.wide {
-    width: 100%;
-    max-width: 700px;
-}
-
-/* Headings */
-h2 {
     text-align: center;
-    color: #333;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.2);
 }
 
-h3 {
-    color: #444;
+.auth-card input {
+    width: 100%;
+    margin: 10px 0;
+    padding: 10px;
 }
 
-/* Inputs */
-input {
+.auth-card button {
     width: 100%;
     padding: 10px;
-    margin: 8px 0;
-    border: 1px solid #ddd;
-    border-radius: 6px;
-    outline: none;
-}
-
-/* Buttons */
-button {
-    padding: 10px 16px;
     background: #4a76a8;
     color: white;
     border: none;
     border-radius: 6px;
-    cursor: pointer;
-    transition: 0.2s;
 }
 
-button:hover {
-    background: #3b5f87;
-}
-
-/* Friend cards */
-.friend-card {
+/* ======================
+   CHAT LAYOUT
+====================== */
+.chat-layout {
     display: flex;
-    justify-content: space-between;
+    height: calc(100vh - 70px);
+    width: 100%;
+}
+
+/* ======================
+   LEFT SIDEBAR
+====================== */
+.sidebar {
+    width: 280px;
+    background: rgba(0,0,0,0.9);
+    color: white;
+    padding: 15px;
+    overflow-y: auto;
+}
+
+/* ======================
+   FRIEND ITEM
+====================== */
+.chat-user {
+    display: flex;
     align-items: center;
-    background: #f7f7fb;
-    padding: 12px;
-    border-radius: 8px;
-    margin-bottom: 10px;
-}
-
-/* Flash messages */
-.flash {
+    gap: 10px;
     padding: 10px;
-    border-radius: 6px;
-    margin-bottom: 10px;
-    text-align: center;
+    color: white;
+    text-decoration: none;
+    border-radius: 10px;
+    margin-bottom: 8px;
 }
 
-.flash-error {
-    background: #ffe1e1;
-    color: #a00000;
+.chat-user:hover {
+    background: rgba(255,255,255,0.1);
 }
 
-.flash-success {
-    background: #e1ffe6;
-    color: #1a7f37;
+/* ======================
+   ⭐ AVATAR (NEW REAL PROFILE PICTURES)
+====================== */
+.avatar {
+    width: 42px;
+    height: 42px;
+    border-radius: 50%;
+    object-fit: cover;   /* IMPORTANT: keeps image clean */
+    background: #333;
+
+    /* centre the letter used when there is no avatar_url */
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    overflow: hidden;
+    font-weight: 600;
 }
 
-/* Chat box */
+.avatar img {
+    width: 100%;
+    height: 100%;
+    border-radius: 50%;
+    object-fit: cover;
+}
+
+/* optional bigger avatar in chat header */
+.chat-avatar {
+    width: 45px;
+    height: 45px;
+    border-radius: 50%;
+    object-fit: cover;
+    border: 2px solid #4a76a8;
+}
+
+/* ======================
+   CENTER CHAT AREA
+====================== */
+.main-panel {
+    flex: 1;
+    display: flex;
+    justify-content: center;
+    padding: 20px;
+    overflow: hidden;
+}
+
+/* chat container */
+.container,
+.container.wide {
+    width: 100%;
+    max-width: 750px;
+    background: rgba(255,255,255,0.9);
+    padding: 15px;
+    border-radius: 12px;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+}
+
+/* ======================
+   CHAT BOX
+====================== */
 .chat-box {
-    height: 350px;
+    flex: 1;
+    min-height: 0;
     overflow-y: auto;
     background: #f4f6f8;
+    padding: 12px;
     border-radius: 10px;
-    padding: 15px;
+
     display: flex;
     flex-direction: column;
     gap: 10px;
 }
 
-/* Chat bubbles */
+/* bubbles */
 .bubble {
     padding: 10px 14px;
     border-radius: 18px;
@@ -158,30 +211,198 @@ button:hover {
     word-wrap: break-word;
 }
 
-/* sent messages */
 .bubble.sent {
     background: #4a76a8;
     color: white;
     align-self: flex-end;
-    border-bottom-right-radius: 5px;
 }
 
-/* received messages */
 .bubble.received {
     background: #e5e5ea;
     color: #333;
     align-self: flex-start;
-    border-bottom-left-radius: 5px;
 }
 
-/* Chat form */
+/* ======================
+   INPUT AREA
+====================== */
 .chat-form {
     display: flex;
     gap: 10px;
-    margin-top: 15px;
+    margin-top: 10px;
 }
 
 .chat-form input {
     flex: 1;
-    margin: 0;
+    padding: 10px;
+}
+
+/* ======================
+   STATUS DOT (PINK + BLUE)
+====================== */
+.status-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+}
+
+.status-dot.online {
+    background: linear-gradient(45deg, #ff4fd8, #4f7bff);
+}
+
+.status-dot.offline {
+    background: #444;
+}
+
+/* ======================
+   FLASH MESSAGES
+====================== */
+.flash {
+    padding: 10px;
+    margin: 10px auto;
+    width: fit-content;
+    border-radius: 6px;
+}
+
+.flash-error {
+    background: #ffe1e1;
+}
+
+.flash-success {
+    background: #d4ffd8;
+}
+
+/* ======================
+   CHAT PAGE HEADER
+====================== */
+.main-panel .container {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.chat-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding-bottom: 12px;
+    margin-bottom: 12px;
+    border-bottom: 1px solid rgba(0,0,0,0.1);
+}
+
+.chat-header-info {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.chat-header-info strong {
+    color: #333;
+}
+
+/* the typing line sits under the name, so it is always visible */
+.typing-indicator {
+    flex-basis: 100%;
+    font-size: 12px;
+    color: #6b7280;
+    height: 14px;
+}
+
+.back-link {
+    font-size: 26px;
+    line-height: 1;
+    color: #4a76a8;
+    text-decoration: none;
+    padding: 0 4px;
+}
+
+/* ======================
+   SIDEBAR FRIEND DETAILS
+====================== */
+.chat-user.active {
+    background: rgba(255,255,255,0.18);
+}
+
+.user-info {
+    min-width: 0;
+    flex: 1;
+}
+
+.name-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.name-row span:first-child {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.preview {
+    opacity: 0.6;
+}
+
+/* ======================
+   COMPOSER
+====================== */
+.chat-form button {
+    padding: 0 16px;
+    border: none;
+    border-radius: 6px;
+    background: #4a76a8;
+    color: white;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 15px;
+}
+
+#emojiBtn {
+    background: transparent;
+    font-size: 22px;
+    padding: 0 6px;
+    line-height: 1;
+}
+
+/* ======================
+   ADD FRIEND FORM
+====================== */
+.add-friend-form {
+    display: flex;
+    gap: 10px;
+    margin-top: 20px;
+}
+
+.add-friend-form input {
+    flex: 1;
+    padding: 10px;
+    border: 1px solid #ccc;
+    border-radius: 6px;
+    font-family: inherit;
+}
+
+.add-friend-form button {
+    padding: 10px 18px;
+    border: none;
+    border-radius: 6px;
+    background: #4a76a8;
+    color: white;
+    cursor: pointer;
+    font-family: inherit;
+}
+
+/* ======================
+   MOBILE
+====================== */
+@media (max-width: 900px) {
+    .sidebar {
+        display: none;
+    }
+
+    .main-panel {
+        padding: 10px;
+    }
 }

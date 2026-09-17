@@ -2,33 +2,51 @@
 <html>
 <head>
     <title>CHATTI</title>
+
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600&display=swap" rel="stylesheet">
+
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
+
 <body>
-    {% if session.user_id %}
+
+    <!-- TOP NAVBAR -->
     <nav class="navbar">
         <span class="logo">CHATTI</span>
+
         <div class="nav-links">
-            <a href="/">Home</a>
-            <a href="/friends">Friends</a>
-            <a href="/logout">Log out</a>
+            {% if session.get("user_id") %}
+                <a href="/">Home</a>
+                <a href="/friends">Friends</a>
+                <a href="/logout">Logout</a>
+            {% else %}
+                <a href="/login">Login</a>
+                <a href="/signup">Signup</a>
+            {% endif %}
         </div>
     </nav>
-    {% endif %}
 
-    <div class="page-wrapper">
-        <div class="{% block container_class %}container{% endblock %}">
-            {% with messages = get_flashed_messages(with_categories=true) %}
-                {% if messages %}
+    <!-- MAIN APP WRAPPER -->
+    <div class="app-wrapper">
+
+        <!-- FLASH MESSAGES -->
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                <div class="flash-container">
                     {% for category, message in messages %}
                         <div class="flash flash-{{ category }}">{{ message }}</div>
                     {% endfor %}
-                {% endif %}
-            {% endwith %}
-            {% block content %}{% endblock %}
-        </div>
+                </div>
+            {% endif %}
+        {% endwith %}
+
+        <!-- PAGE CONTENT -->
+        {% block content %}{% endblock %}
+
     </div>
+
+    {% block scripts %}{% endblock %}
+
 </body>
 </html>
