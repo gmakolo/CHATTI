@@ -46,6 +46,33 @@
 
     </div>
 
+    <!--
+      One Socket.IO connection for the whole app. It lives here rather than in
+      chat.html so that presence is tracked on every page -- otherwise a user
+      sitting on /friends never connects, never registers as online, and their
+      status dots never update.
+    -->
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <script>
+    const CURRENT_USER_ID = {{ session.get("user_id") | tojson }};
+
+    // Anonymous visitors (login/signup) get no connection at all.
+    const socket = CURRENT_USER_ID === null ? null : io();
+
+    if (socket) {
+        socket.on("user_status", (data) => {
+            const dots = document.querySelectorAll(
+                `.status-dot[data-user-id="${data.user_id}"]`
+            );
+
+            dots.forEach((dot) => {
+                dot.classList.toggle("online", data.status === "online");
+                dot.classList.toggle("offline", data.status === "offline");
+            });
+        });
+    }
+    </script>
+
     {% block scripts %}{% endblock %}
 
 </body>

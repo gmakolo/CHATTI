@@ -1,0 +1,14 @@
+# Runtime dependencies for CHATTI.
+# Install with:  pip install -r requirements.txt
+#
+# Versions below are the exact set the app was last verified against
+# (Python 3.13.5 on Windows). Loosen them to >= if you prefer.
+
+Flask==3.1.3
+Flask-SocketIO==5.6.1
+Flask-SQLAlchemy==3.1.1
+
+# Flask-SocketIO pulls in python-socketio / python-engineio. simple-websocket is
+# what actually serves the WebSocket transport on the Werkzeug dev server -- without
+# it Socket.IO silently falls back to HTTP long-polling instead of real WebSockets.
+simple-websocket==1.1.0

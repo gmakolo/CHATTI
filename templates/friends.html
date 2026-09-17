@@ -32,11 +32,8 @@
                 <div class="name-row">
                     <span>{{ friend.username }}</span>
 
-                    {% if friend.id in online_users %}
-                        <span class="status-dot online"></span>
-                    {% else %}
-                        <span class="status-dot offline"></span>
-                    {% endif %}
+                    <span class="status-dot {{ 'online' if friend.id in online_users else 'offline' }}"
+                          data-user-id="{{ friend.id }}"></span>
                 </div>
 
                 <small class="preview">Tap to chat 💬</small>

@@ -1,0 +1,18 @@
+# Virtualenv -- never commit this. It is platform specific: the committed one
+# was built on Linux (/usr/bin/python3.12) and cannot run on Windows or macOS.
+venv/
+.venv/
+
+# Python bytecode
+__pycache__/
+*.py[cod]
+
+# Local database (created and migrated automatically on first run)
+instance/
+*.db
+
+# Editor / OS noise
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

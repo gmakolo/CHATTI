@@ -1,11 +1,13 @@
 from flask_socketio import SocketIO, emit, join_room
 import os
+import socket
 from datetime import datetime, timezone
 
 from flask import (
     Flask, render_template, request, redirect, session, flash, abort
 )
 from flask_sqlalchemy import SQLAlchemy
+from sqlalchemy import inspect, text
 from werkzeug.security import generate_password_hash, check_password_hash
 
 app = Flask(__name__)
@@ -59,6 +61,47 @@ class Message(db.Model):
 # ======================
 # HELPERS
 # ======================
+def ensure_schema():
+    """Bring an existing database up to date with the models.
+
+    `db.create_all()` only creates missing *tables* -- it never adds columns to
+    a table that already exists. So an older chatti.db keeps its old shape and
+    every query dies with "no such column: user.<field>". Fill in the missing
+    columns here, then create any tables that were absent altogether.
+
+    Returns the list of "<table>.<column>" names it had to add.
+    """
+    db.create_all()
+
+    inspector = inspect(db.engine)
+    dialect = db.engine.dialect
+    added = []
+
+    for model in db.Model.__subclasses__():
+        table = model.__tablename__
+
+        if table not in inspector.get_table_names():
+            continue
+
+        existing = {c["name"] for c in inspector.get_columns(table)}
+
+        for column in model.__table__.columns:
+            if column.name in existing:
+                continue
+
+            # SQLite can only ADD COLUMN if it is nullable or has a constant
+            # default. Every column we add here is nullable, so this is safe.
+            col_type = column.type.compile(dialect=dialect)
+
+            db.session.execute(
+                text(f'ALTER TABLE "{table}" ADD COLUMN "{column.name}" {col_type}')
+            )
+            added.append(f"{table}.{column.name}")
+
+    db.session.commit()
+    return added
+
+
 def get_friends(uid):
     sent = Friendship.query.filter_by(user_id=uid).all()
     recv = Friendship.query.filter_by(friend_id=uid).all()
@@ -320,11 +363,55 @@ def on_stop_typing(data):
     emit("stop_typing", {"user": uid}, room=room(uid, fid), include_self=False)
 
 
+def pick_port(preferred=5000, tries=20):
+    """`preferred`, or the first free port above it if it is already taken.
+
+    Port 5000 is a popular squatter -- macOS AirPlay and, on Windows, any
+    service that bound it first. Losing that race is not this app's fault, and
+    the failure mode (`bind` dying with "access permissions" or "address
+    already in use") is cryptic. Probing here turns it into a non-event.
+
+    Deliberately no SO_REUSEADDR: on Windows that lets `bind` appear to succeed
+    against a port another process holds exclusively, which is exactly the case
+    we are trying to detect.
+    """
+    for port in range(preferred, preferred + tries):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+            try:
+                probe.bind(("127.0.0.1", port))
+            except OSError:
+                continue
+            return port
+
+    return preferred
+
+
 # ======================
 # RUN SERVER
 # ======================
-if __name__ == "__main__":
-    with app.app_context():
-        db.create_all()
+# Run this at import time, not just under __main__: gunicorn and `flask run`
+# only import the module, and without this they would serve an app whose
+# tables (or columns) do not exist yet.
+with app.app_context():
+    _added = ensure_schema()
+    if _added:
+        print("Schema updated: " + ", ".join(_added))
 
-    socketio.run(app, debug=True)
+
+if __name__ == "__main__":
+    # PORT pins a specific port (containers, tunnels); otherwise take the first
+    # free one at or above 5000 and say so when that is not 5000.
+    if os.environ.get("PORT"):
+        _port = int(os.environ["PORT"])
+    else:
+        # Resolve once, then hand the answer to the reloader's child through the
+        # environment. Re-probing on every reload would walk the port upward:
+        # the outgoing child still holds the old port for an instant, so the
+        # fresh probe sees it as busy and takes the next one.
+        _port = int(os.environ.get("_CHATTI_PORT") or pick_port())
+        os.environ["_CHATTI_PORT"] = str(_port)
+
+        if _port != 5000 and not os.environ.get("WERKZEUG_RUN_MAIN"):
+            print(f"Port 5000 is busy -- starting on http://127.0.0.1:{_port} instead.")
+
+    socketio.run(app, host="127.0.0.1", port=_port, debug=True)

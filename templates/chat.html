@@ -84,13 +84,10 @@
 {% endblock %}
 
 {% block scripts %}
-<script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+<!-- socket.io and the shared `socket` come from base.html -->
 <script src="https://cdn.jsdelivr.net/npm/@joeattardi/emoji-button@4.6.4/dist/index.min.js"></script>
 <script>
-const socket = io();
-
 const friendId = {{ friend.id }};
-const currentUserId = {{ current_user_id }};
 
 const chatBox = document.getElementById("chat-box");
 const form = document.getElementById("chat-form");
@@ -114,7 +111,7 @@ function addBubble(content, mine) {
 }
 
 socket.on("receive_message", (data) => {
-    addBubble(data.content, data.sender_id === currentUserId);
+    addBubble(data.content, data.sender_id === CURRENT_USER_ID);
 });
 
 // =====================
@@ -154,25 +151,13 @@ input.addEventListener("input", () => {
 });
 
 socket.on("typing", (data) => {
-    if (data.user !== currentUserId) {
+    if (data.user !== CURRENT_USER_ID) {
         typingBox.innerText = "typing...";
     }
 });
 
 socket.on("stop_typing", () => {
     typingBox.innerText = "";
-});
-
-// =====================
-// ONLINE STATUS
-// =====================
-socket.on("user_status", (data) => {
-    const dots = document.querySelectorAll(`.status-dot[data-user-id="${data.user_id}"]`);
-
-    dots.forEach((dot) => {
-        dot.classList.toggle("online", data.status === "online");
-        dot.classList.toggle("offline", data.status === "offline");
-    });
 });
 
 // =====================
