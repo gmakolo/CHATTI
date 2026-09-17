@@ -10,6 +10,7 @@ app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///chatti.db"
 app.secret_key = os.environ.get("SECRET_KEY", "dev-only-fallback-key")
 db = SQLAlchemy(app)
 
+# MODELS
 class User(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(50), unique=True, nullable=False)
@@ -27,12 +28,14 @@ class Message(db.Model):
     content = db.Column(db.Text, nullable=False)
     timestamp = db.Column(db.DateTime, default=datetime.utcnow)
 
+# HOME (FIXED SINGLE VERSION)
 @app.route("/")
 def home():
     if "user_id" in session:
-        return "Welcome to CHATTI! <a href='/friends'>Friends</a> | <a href='/logout'>Log out</a>"
+        return render_template("home.html")
     return redirect("/login")
 
+# SIGNUP
 @app.route("/signup", methods=["GET", "POST"])
 def signup():
     if request.method == "POST":
@@ -40,148 +43,170 @@ def signup():
         password = request.form["password"]
 
         if not username:
-            flash("Username can't be empty or just spaces.", "error")
+            flash("Username cannot be empty", "error")
             return redirect("/signup")
 
-        if not re.match(r'^[A-Za-z!@#$%^&*()_+\-=\[\]{};:,.<>?]+$', username):
-            flash("Username can only contain letters and symbols (no numbers).", "error")
+        # FIXED: allows letters + numbers (normal usernames)
+        if not re.match(r'^[A-Za-z0-9_]+$', username):
+            flash("Username can only contain letters, numbers, underscore", "error")
             return redirect("/signup")
 
         if len(password) < 6:
-            flash("Password must be at least 6 characters long.", "error")
+            flash("Password must be at least 6 characters", "error")
             return redirect("/signup")
 
-        existing_user = User.query.filter_by(username=username).first()
-        if existing_user:
-            flash("That username is already taken.", "error")
+        if User.query.filter_by(username=username).first():
+            flash("Username already exists", "error")
             return redirect("/signup")
 
-        hashed_password = generate_password_hash(password)
-        new_user = User(username=username, password=hashed_password)
-        db.session.add(new_user)
+        user = User(username=username, password=generate_password_hash(password))
+        db.session.add(user)
         db.session.commit()
-        flash("Account created! You can log in now.", "success")
+
+        flash("Account created!", "success")
         return redirect("/login")
+
     return render_template("signup.html")
 
+# LOGIN
 @app.route("/login", methods=["GET", "POST"])
 def login():
     if request.method == "POST":
         username = request.form["username"].strip()
         password = request.form["password"]
+
         user = User.query.filter_by(username=username).first()
+
         if user and check_password_hash(user.password, password):
             session["user_id"] = user.id
             return redirect("/")
-        flash("Invalid username or password.", "error")
+        flash("Invalid login", "error")
         return redirect("/login")
+
     return render_template("login.html")
 
+# LOGOUT
 @app.route("/logout")
 def logout():
     session.pop("user_id", None)
     return redirect("/login")
 
+# FRIENDS HELPERS
 def get_friend_ids(user_id):
     sent = Friendship.query.filter_by(user_id=user_id).all()
     received = Friendship.query.filter_by(friend_id=user_id).all()
-    friend_ids = [f.friend_id for f in sent] + [f.user_id for f in received]
-    return friend_ids
+    return [f.friend_id for f in sent] + [f.user_id for f in received]
 
-@app.route("/friends", methods=["GET"])
+# FRIENDS PAGE
+@app.route("/friends")
 def friends():
     if "user_id" not in session:
         return redirect("/login")
 
-    current_user_id = session["user_id"]
-    friend_ids = get_friend_ids(current_user_id)
-    friend_list = User.query.filter(User.id.in_(friend_ids)).all()
+    uid = session["user_id"]
+    friend_ids = get_friend_ids(uid)
 
-    search_query = request.args.get("search")
-    search_results = []
-    if search_query:
-        search_results = User.query.filter(
-            User.username.contains(search_query),
-            User.id != current_user_id
+    friends = User.query.filter(User.id.in_(friend_ids)).all() if friend_ids else []
+
+    search = request.args.get("search")
+    results = []
+
+    if search:
+        results = User.query.filter(
+            User.username.contains(search),
+            User.id != uid
         ).all()
 
-    return render_template("friends.html", friends=friend_list, search_results=search_results)
+    return render_template("friends.html", friends=friends, search_results=results)
 
+# ADD FRIEND
 @app.route("/add_friend/<int:friend_id>", methods=["POST"])
 def add_friend(friend_id):
     if "user_id" not in session:
         return redirect("/login")
 
-    current_user_id = session["user_id"]
-    existing = Friendship.query.filter_by(user_id=current_user_id, friend_id=friend_id).first()
-    if not existing:
-        new_friendship = Friendship(user_id=current_user_id, friend_id=friend_id)
-        db.session.add(new_friendship)
+    uid = session["user_id"]
+
+    exists = Friendship.query.filter_by(user_id=uid, friend_id=friend_id).first()
+    if not exists:
+        db.session.add(Friendship(user_id=uid, friend_id=friend_id))
         db.session.commit()
+
     return redirect("/friends")
 
+# UNFRIEND
 @app.route("/unfriend/<int:friend_id>", methods=["POST"])
 def unfriend(friend_id):
     if "user_id" not in session:
         return redirect("/login")
 
-    current_user_id = session["user_id"]
-    Friendship.query.filter_by(user_id=current_user_id, friend_id=friend_id).delete()
-    Friendship.query.filter_by(user_id=friend_id, friend_id=current_user_id).delete()
+    uid = session["user_id"]
+
+    Friendship.query.filter_by(user_id=uid, friend_id=friend_id).delete()
+    Friendship.query.filter_by(user_id=friend_id, friend_id=uid).delete()
     db.session.commit()
+
     return redirect("/friends")
 
-def get_messages_between(user_a, user_b):
+# GET MESSAGES
+def get_messages_between(a, b):
     return Message.query.filter(
-        ((Message.sender_id == user_a) & (Message.receiver_id == user_b)) |
-        ((Message.sender_id == user_b) & (Message.receiver_id == user_a))
+        ((Message.sender_id == a) & (Message.receiver_id == b)) |
+        ((Message.sender_id == b) & (Message.receiver_id == a))
     ).order_by(Message.id).all()
 
+# CHAT PAGE
 @app.route("/chat/<int:friend_id>")
 def chat(friend_id):
     if "user_id" not in session:
         return redirect("/login")
 
-    current_user_id = session["user_id"]
+    uid = session["user_id"]
     friend = User.query.get(friend_id)
-    messages = get_messages_between(current_user_id, friend_id)
 
-    return render_template("chat.html", friend=friend, messages=messages, current_user_id=current_user_id)
+    messages = get_messages_between(uid, friend_id)
 
-@app.route("/messages/<int:friend_id>")
-def get_messages_json(friend_id):
-    if "user_id" not in session:
-        return jsonify([])
+    return render_template("chat.html", friend=friend, messages=messages)
 
-    current_user_id = session["user_id"]
-    messages = get_messages_between(current_user_id, friend_id)
-
-    result = []
-    for m in messages:
-        result.append({
-            "content": m.content,
-            "is_mine": m.sender_id == current_user_id,
-            "time": m.timestamp.strftime("%I:%M %p") if m.timestamp else ""
-        })
-    return jsonify(result)
-@app.route("/")
-def home():
-    if "user_id" in session:
-        return render_template("home.html")
-    return redirect("/login")
+# SEND MESSAGE
 @app.route("/send_message/<int:friend_id>", methods=["POST"])
 def send_message(friend_id):
     if "user_id" not in session:
         return redirect("/login")
 
-    current_user_id = session["user_id"]
-    content = request.form["content"]
+    content = request.form["content"].strip()
 
-    new_message = Message(sender_id=current_user_id, receiver_id=friend_id, content=content)
-    db.session.add(new_message)
+    if not content:
+        return redirect(f"/chat/{friend_id}")
+
+    db.session.add(Message(
+        sender_id=session["user_id"],
+        receiver_id=friend_id,
+        content=content
+    ))
     db.session.commit()
 
     return redirect(f"/chat/{friend_id}")
 
+# JSON API
+@app.route("/messages/<int:friend_id>")
+def get_messages_json(friend_id):
+    if "user_id" not in session:
+        return jsonify([])
+
+    uid = session["user_id"]
+    msgs = get_messages_between(uid, friend_id)
+
+    return jsonify([
+        {
+            "content": m.content,
+            "is_mine": m.sender_id == uid,
+            "time": m.timestamp.strftime("%H:%M")
+        }
+        for m in msgs
+    ])
+
 if __name__ == "__main__":
+    with app.app_context():
+        db.create_all()
     app.run(debug=True)
