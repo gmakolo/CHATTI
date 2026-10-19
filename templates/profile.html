@@ -1,0 +1,128 @@
+{% extends "base.html" %}
+
+{% block content %}
+<main class="profile-page">
+    <section class="profile-card">
+        <div class="profile-heading">
+            <div class="avatar profile-avatar{% if user.id in online_users %} is-online{% endif %}" id="profile-avatar" data-user-id="{{ user.id }}">
+                {% if user.avatar_url %}<img src="{{ user.avatar_url }}" alt="Profile picture">{% else %}{{ user.username[0].upper() }}{% endif %}
+            </div>
+            <div>
+                <p class="profile-kicker">{{ 'YOUR CHATTI PROFILE' if is_owner else 'CHATTI PROFILE' }}</p>
+                <h1>{{ user.username }}</h1>
+            </div>
+            {% if is_owner %}<button type="button" class="profile-edit-button" id="edit-profile-button" aria-expanded="false">Edit profile</button>{% endif %}
+        </div>
+
+        <div class="profile-about" id="profile-about">
+            <span>About</span>
+            <p>{{ user.bio or 'Add a little about yourself.' }}</p>
+            {% if is_owner %}
+            <span class="profile-email-label">Recovery email</span>
+            <p>{{ user.email or 'Add an email address so you can recover your password.' }}</p>
+            {% endif %}
+        </div>
+
+        {% if is_owner %}
+        <form method="POST" enctype="multipart/form-data" class="profile-form" id="profile-form" hidden>
+            <label>Profile picture</label>
+            <div class="picture-picker-row">
+                <button type="button" class="picture-picker-button" id="choose-picture">＋ Add profile picture</button>
+                <span id="picture-file-name">PNG, JPG, GIF, or WebP · up to 3 MB</span>
+                <input id="profile_picture" type="file" name="profile_picture" accept="image/png,image/jpeg,image/gif,image/webp" hidden>
+            </div>
+            {% if user.avatar_url %}<label class="remove-picture-option"><input type="checkbox" name="remove_picture"> Remove current picture</label>{% endif %}
+
+            <label for="profile-email">Recovery email</label>
+            <input id="profile-email" type="email" name="email" maxlength="254"
+                   autocomplete="email" value="{{ user.email or '' }}" placeholder="you@example.com">
+            <small>Used to send password recovery links.</small>
+
+            <label for="bio">About</label>
+            <textarea id="bio" name="bio" maxlength="120" rows="3"
+                      placeholder="A short hello for your friends">{{ user.bio or '' }}</textarea>
+            <div class="status-emoji-tools profile-emoji-tools">
+                <button type="button" id="bio-emoji-toggle" aria-expanded="false">😊 Add emoji</button>
+                <div class="status-emoji-picker" id="bio-emoji-picker" hidden aria-label="Choose an emoji">
+                    {% for emoji in ['🥰', '🥹', '😍', '😊', '😘', '😂', '❤️', '💖', '💕', '💗', '🦋', '🌸', '🌷', '🐻', '🐰', '🧸', '🍓', '✨', '🎀', '🌈', '☁️', '🌙', '🌿', '🙏'] %}
+                    <button type="button" class="bio-emoji-option" aria-label="{{ emoji }}">{{ emoji }}</button>
+                    {% endfor %}
+                </div>
+            </div>
+            <small>Up to 120 characters.</small>
+
+            <div class="profile-form-actions">
+                <button type="submit">Save</button>
+                <button type="button" class="profile-cancel-button" id="cancel-profile-edit">Cancel</button>
+            </div>
+        </form>
+        {% endif %}
+    </section>
+</main>
+{% endblock %}
+
+{% block scripts %}
+{% if is_owner %}
+<script>
+const editProfileButton = document.getElementById("edit-profile-button");
+const profileForm = document.getElementById("profile-form");
+const profileAbout = document.getElementById("profile-about");
+const pictureInput = document.getElementById("profile_picture");
+const pictureFileName = document.getElementById("picture-file-name");
+const profileAvatar = document.getElementById("profile-avatar");
+const initialAvatar = profileAvatar.innerHTML;
+
+function setProfileEditing(editing) {
+    if (!editing) {
+        profileForm.reset();
+        profileAvatar.innerHTML = initialAvatar;
+        pictureFileName.textContent = "PNG, JPG, GIF, or WebP · up to 3 MB";
+    }
+    profileForm.hidden = !editing;
+    profileAbout.hidden = editing;
+    editProfileButton.hidden = editing;
+    editProfileButton.setAttribute("aria-expanded", String(editing));
+}
+
+editProfileButton.addEventListener("click", () => setProfileEditing(true));
+document.getElementById("cancel-profile-edit").addEventListener("click", () => setProfileEditing(false));
+document.getElementById("choose-picture").addEventListener("click", () => pictureInput.click());
+pictureInput.addEventListener("change", () => {
+    const file = pictureInput.files[0];
+    if (!file) return;
+    pictureFileName.textContent = file.name;
+    profileAvatar.innerHTML = "";
+    const preview = document.createElement("img");
+    preview.alt = "Selected profile picture preview";
+    preview.src = URL.createObjectURL(file);
+    profileAvatar.appendChild(preview);
+});
+
+const bioTextarea = document.getElementById("bio");
+const bioEmojiToggle = document.getElementById("bio-emoji-toggle");
+const bioEmojiPicker = document.getElementById("bio-emoji-picker");
+
+bioEmojiToggle.addEventListener("click", () => {
+    const isOpen = !bioEmojiPicker.hidden;
+    bioEmojiPicker.hidden = isOpen;
+    bioEmojiToggle.setAttribute("aria-expanded", String(!isOpen));
+});
+
+bioEmojiPicker.addEventListener("click", (event) => {
+    const button = event.target.closest(".bio-emoji-option");
+    if (!button) return;
+
+    const start = bioTextarea.selectionStart;
+    const end = bioTextarea.selectionEnd;
+    const emoji = button.textContent;
+    const next = bioTextarea.value.slice(0, start) + emoji + bioTextarea.value.slice(end);
+    if (next.length > 120) return;
+
+    bioTextarea.value = next;
+    bioTextarea.focus();
+    const cursor = start + emoji.length;
+    bioTextarea.setSelectionRange(cursor, cursor);
+});
+</script>
+{% endif %}
+{% endblock %}

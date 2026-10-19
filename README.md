@@ -85,10 +85,35 @@ Stop it with `Ctrl+C`.
 ## Using it
 
 1. Go to `/signup` and create an account.
-2. Log in.
-3. On the **Friends** page, type another user's username and add them.
+2. Add a working email address when signing up. Existing users can add one from **Profile**.
+3. Log in.
+4. On the **Friends** page, type another user's username and add them.
    (Friendships are one-way rows but work in both directions once added.)
-4. Click a friend to open the chat and send messages.
+5. Click a friend to open the chat and send messages.
+
+## Password recovery
+
+The **Forgot password?** link sends a one-hour reset link to the email address on
+the account. Configure an SMTP server and the public app URL before relying on
+email recovery. For example, set these environment variables before starting
+CHATTI:
+
+```text
+MAIL_SERVER=smtp.example.com
+MAIL_PORT=587
+MAIL_USERNAME=your-smtp-user
+MAIL_PASSWORD=your-smtp-password
+MAIL_DEFAULT_SENDER=chatti@example.com
+MAIL_USE_TLS=true
+MAIL_USE_SSL=false
+SECRET_KEY=replace-with-a-long-random-secret
+APP_BASE_URL=https://chat.example.com
+```
+
+Use your email provider's SMTP host and credentials. Set `SECRET_KEY` to a long,
+random value and `APP_BASE_URL` to the
+URL users open in their browser so reset links point to the right site. Existing
+accounts need an email saved in **Profile** before they can recover access.
 
 To try the real-time side yourself, open a second browser (or a private window),
 sign up as a second user, add the first user as a friend, and chat between them.

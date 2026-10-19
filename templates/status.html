@@ -1,0 +1,254 @@
+{% extends "base.html" %}
+
+{% block content %}
+<main class="status-page">
+    <section class="status-column">
+        <header class="status-page-heading">
+            <h1>Updates</h1>
+            <span>Updates disappear after 12 hours</span>
+        </header>
+
+        <section class="status-section">
+            <div class="status-section-heading">
+                <h2>My update</h2>
+                <button type="button" id="add-status-button" class="add-status-button">＋ Add update</button>
+            </div>
+            <form method="POST" enctype="multipart/form-data" class="status-composer" id="status-composer" hidden>
+            <div class="status-compose-head">
+                <div class="avatar status-avatar">
+                    {% if current_user.avatar_url %}<img src="{{ current_user.avatar_url }}" alt="">{% else %}{{ current_user.username[0].upper() }}{% endif %}
+                </div>
+                <div><strong>{{ current_user.username }}</strong><small>Share a moment with friends</small></div>
+            </div>
+            <div class="status-media-picker">
+                <button type="button" id="status-media-button">＋ Add photo, video, or audio</button>
+                <span id="status-media-name">JPG, PNG, GIF, WebP, MP4, WebM, MP3, M4A, OGG, or WAV · up to 25 MB</span>
+                <input type="file" id="status-media-input" name="media_file"
+                       accept="image/png,image/jpeg,image/gif,image/webp,video/mp4,video/webm,audio/mpeg,audio/mp4,audio/ogg,audio/wav,audio/x-wav,audio/webm" hidden>
+            </div>
+            <div class="status-compose-preview" id="status-media-preview" hidden></div>
+            <label class="status-caption-label" for="status-content">Caption</label>
+            <textarea id="status-content" name="content" maxlength="500" rows="3"
+                      placeholder="What are you feeling?"></textarea>
+            <div class="status-emoji-tools">
+                <button type="button" id="status-emoji-toggle" aria-expanded="false">😊 Add emoji</button>
+                <div class="status-emoji-picker" id="status-emoji-picker" hidden aria-label="Choose an emoji">
+                    {% for emoji in ['🥰', '🥹', '😍', '😊', '😘', '😂', '❤️', '💖', '💕', '💗', '🦋', '🌸', '🌷', '🐻', '🐰', '🧸', '🍓', '✨', '🎀', '🌈', '☁️', '🌙', '🌿', '🙏'] %}
+                    <button type="button" class="status-emoji-option" aria-label="{{ emoji }}">{{ emoji }}</button>
+                    {% endfor %}
+                </div>
+            </div>
+            <div class="status-composer-footer">
+                <span>Visible to your friends</span>
+                <div class="status-compose-actions">
+                    <button type="button" class="status-cancel-button" id="cancel-status-button">Cancel</button>
+                    <button type="submit">Share update</button>
+                </div>
+            </div>
+            </form>
+
+            <div class="updates-circles">
+            {% for status, author in own_statuses %}
+                <button type="button" class="updates-story" data-author="You"
+                        data-time="{{ status.timestamp.strftime('%b %d, %H:%M') }} UTC"
+                        data-content="{{ status.content }}" data-media-url="{{ status.media_url or '' }}"
+                        data-media-type="{{ status.media_type or '' }}" data-delete-url="/status/{{ status.id }}/delete">
+                    <span class="updates-story-avatar">
+                        {% if author.avatar_url %}<img src="{{ author.avatar_url }}" alt="">{% else %}{{ author.username[0].upper() }}{% endif %}
+                        <span class="updates-story-ring"></span>
+                    </span>
+                    <span class="updates-story-name">My update</span>
+                </button>
+            {% else %}
+                <button type="button" class="updates-story" id="empty-add-status-button">
+                    <span class="updates-story-avatar updates-story-empty">{{ current_user.username[0].upper() }}<span class="updates-story-plus">＋</span></span>
+                    <span class="updates-story-name">My update</span>
+                </button>
+            {% endfor %}
+            </div>
+        </section>
+
+        <section class="status-section">
+            <h2>Recent updates</h2>
+            <div class="updates-circles">
+            {% for status, author in friend_statuses %}
+                <button type="button" class="updates-story" data-author="{{ author.username }}"
+                        data-time="{{ status.timestamp.strftime('%b %d, %H:%M') }} UTC"
+                        data-content="{{ status.content }}" data-media-url="{{ status.media_url or '' }}"
+                        data-media-type="{{ status.media_type or '' }}">
+                    <span class="updates-story-avatar">
+                        {% if author.avatar_url %}<img src="{{ author.avatar_url }}" alt="">{% else %}{{ author.username[0].upper() }}{% endif %}
+                        <span class="updates-story-ring"></span>
+                    </span>
+                    <span class="updates-story-name">{{ author.username }}</span>
+                </button>
+            {% else %}
+                <p class="status-no-updates">No recent updates from friends.</p>
+            {% endfor %}
+            </div>
+        </section>
+    </section>
+</main>
+
+<div class="updates-viewer" id="updates-viewer" role="dialog" aria-modal="true" aria-label="Update" hidden>
+    <div class="updates-viewer-card">
+        <div class="updates-viewer-header">
+            <div><strong id="updates-viewer-author"></strong><time id="updates-viewer-time"></time></div>
+            <button type="button" id="updates-viewer-close" aria-label="Close update">×</button>
+        </div>
+        <div id="updates-viewer-media" class="updates-viewer-media"></div>
+        <p id="updates-viewer-content" class="updates-viewer-content"></p>
+        <form method="POST" id="updates-viewer-delete-form" hidden>
+            <button type="submit">Delete my update</button>
+        </form>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const statusTextarea = document.getElementById("status-content");
+const statusEmojiToggle = document.getElementById("status-emoji-toggle");
+const statusEmojiPicker = document.getElementById("status-emoji-picker");
+const statusComposer = document.getElementById("status-composer");
+const addStatusButton = document.getElementById("add-status-button");
+const statusMediaPreview = document.getElementById("status-media-preview");
+const statusMediaInput = document.getElementById("status-media-input");
+let statusPreviewUrl = null;
+let lastStatusCursorStart = 0;
+let lastStatusCursorEnd = 0;
+
+function rememberStatusCursor() {
+    lastStatusCursorStart = statusTextarea.selectionStart;
+    lastStatusCursorEnd = statusTextarea.selectionEnd;
+}
+
+statusTextarea.addEventListener("click", rememberStatusCursor);
+statusTextarea.addEventListener("keyup", rememberStatusCursor);
+statusTextarea.addEventListener("select", rememberStatusCursor);
+statusTextarea.addEventListener("input", rememberStatusCursor);
+statusTextarea.addEventListener("blur", rememberStatusCursor);
+statusEmojiPicker.addEventListener("mousedown", (event) => {
+    if (event.target.closest(".status-emoji-option")) event.preventDefault();
+});
+
+const updatesViewer = document.getElementById("updates-viewer");
+const viewerMedia = document.getElementById("updates-viewer-media");
+const viewerContent = document.getElementById("updates-viewer-content");
+const viewerDeleteForm = document.getElementById("updates-viewer-delete-form");
+let lastFocusedStory = null;
+
+function closeUpdatesViewer() {
+    updatesViewer.hidden = true;
+    viewerMedia.replaceChildren();
+    if (lastFocusedStory) lastFocusedStory.focus();
+}
+
+document.querySelectorAll(".updates-story[data-author]").forEach((story) => {
+    story.addEventListener("click", () => {
+        lastFocusedStory = story;
+        document.getElementById("updates-viewer-author").textContent = story.dataset.author;
+        document.getElementById("updates-viewer-time").textContent = story.dataset.time;
+        viewerContent.textContent = story.dataset.content || "";
+        viewerContent.hidden = !story.dataset.content;
+        viewerDeleteForm.hidden = !story.dataset.deleteUrl;
+        if (story.dataset.deleteUrl) viewerDeleteForm.action = story.dataset.deleteUrl;
+
+        viewerMedia.replaceChildren();
+        if (story.dataset.mediaUrl) {
+            const kind = story.dataset.mediaType;
+            const media = document.createElement(kind === "image" ? "img" : kind === "video" ? "video" : "audio");
+            media.className = "updates-viewer-media-item";
+            media.src = story.dataset.mediaUrl;
+            if (kind === "image") media.alt = "Shared update photo";
+            else {
+                media.controls = true;
+                if (kind === "video") media.playsInline = true;
+            }
+            viewerMedia.appendChild(media);
+        }
+        updatesViewer.hidden = false;
+        document.getElementById("updates-viewer-close").focus();
+    });
+});
+
+document.getElementById("updates-viewer-close").addEventListener("click", closeUpdatesViewer);
+updatesViewer.addEventListener("click", (event) => {
+    if (event.target === updatesViewer) closeUpdatesViewer();
+});
+document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && !updatesViewer.hidden) closeUpdatesViewer();
+});
+
+function openStatusComposer() {
+    statusComposer.hidden = false;
+    addStatusButton.hidden = true;
+    statusTextarea.focus();
+}
+
+function closeStatusComposer() {
+    statusComposer.reset();
+    statusComposer.hidden = true;
+    addStatusButton.hidden = false;
+    if (statusPreviewUrl) URL.revokeObjectURL(statusPreviewUrl);
+    statusPreviewUrl = null;
+    statusMediaPreview.replaceChildren();
+    statusMediaPreview.hidden = true;
+    document.getElementById("status-media-name").textContent = "JPG, PNG, GIF, WebP, MP4, WebM, MP3, M4A, OGG, or WAV · up to 25 MB";
+    statusTextarea.placeholder = "What are you feeling?";
+    lastStatusCursorStart = 0;
+    lastStatusCursorEnd = 0;
+    statusEmojiPicker.hidden = true;
+    statusEmojiToggle.setAttribute("aria-expanded", "false");
+}
+
+addStatusButton.addEventListener("click", openStatusComposer);
+document.getElementById("empty-add-status-button").addEventListener("click", openStatusComposer);
+document.getElementById("cancel-status-button").addEventListener("click", closeStatusComposer);
+document.getElementById("status-media-button").addEventListener("click", () => statusMediaInput.click());
+statusMediaInput.addEventListener("change", () => {
+    const file = statusMediaInput.files[0];
+    if (!file) return;
+
+    document.getElementById("status-media-name").textContent = file.name;
+    if (statusPreviewUrl) URL.revokeObjectURL(statusPreviewUrl);
+    statusPreviewUrl = URL.createObjectURL(file);
+    statusMediaPreview.replaceChildren();
+
+    const elementName = file.type.startsWith("video/") ? "video" : file.type.startsWith("audio/") ? "audio" : "img";
+    const preview = document.createElement(elementName);
+    preview.className = "status-compose-preview-media";
+    preview.src = statusPreviewUrl;
+    if (elementName !== "img") preview.controls = true;
+    if (elementName === "video") preview.playsInline = true;
+    if (elementName === "img") preview.alt = "Selected update photo preview";
+    statusMediaPreview.appendChild(preview);
+    statusMediaPreview.hidden = false;
+    statusTextarea.placeholder = "Add a caption...";
+    statusTextarea.focus();
+});
+
+statusEmojiToggle.addEventListener("click", () => {
+    const isOpen = !statusEmojiPicker.hidden;
+    statusEmojiPicker.hidden = isOpen;
+    statusEmojiToggle.setAttribute("aria-expanded", String(!isOpen));
+});
+
+statusEmojiPicker.addEventListener("click", (event) => {
+    const button = event.target.closest(".status-emoji-option");
+    if (!button) return;
+
+    const start = lastStatusCursorStart;
+    const end = lastStatusCursorEnd;
+    const emoji = button.textContent;
+    const next = statusTextarea.value.slice(0, start) + emoji + statusTextarea.value.slice(end);
+    if (next.length > 500) return;
+
+    statusTextarea.value = next;
+    statusTextarea.focus();
+    const cursor = start + emoji.length;
+    statusTextarea.setSelectionRange(cursor, cursor);
+    rememberStatusCursor();
+});
+</script>
+{% endblock %}

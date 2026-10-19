@@ -16,7 +16,7 @@
         {% for f in friends %}
         <a href="/chat/{{ f.id }}" class="chat-user{% if f.id == friend.id %} active{% endif %}">
 
-            <div class="avatar">
+            <div class="avatar{% if f.id in online_users %} is-online{% endif %}" data-user-id="{{ f.id }}">
                 {% if f.avatar_url %}
                     <img src="{{ f.avatar_url }}" alt="">
                 {% else %}
@@ -45,35 +45,78 @@
             <div class="chat-header">
                 <a href="/friends" class="back-link" title="All chats">&#8249;</a>
 
-                <div class="avatar chat-avatar">
+                <a href="/profile/{{ friend.id }}" class="chat-profile-avatar-link" title="View {{ friend.username }}'s profile">
+                <div class="avatar chat-avatar{% if friend.id in online_users %} is-online{% endif %}" data-user-id="{{ friend.id }}">
                     {% if friend.avatar_url %}
                         <img src="{{ friend.avatar_url }}" alt="">
                     {% else %}
                         {{ friend.username[0].upper() }}
                     {% endif %}
                 </div>
+                </a>
 
                 <div class="chat-header-info">
-                    <strong>{{ friend.username }}</strong>
+                    <a class="chat-profile-name" href="/profile/{{ friend.id }}">{{ friend.username }}</a>
                     <span class="status-dot {{ 'online' if friend.id in online_users else 'offline' }}"
                           data-user-id="{{ friend.id }}"></span>
+                    <span class="chat-activity" id="friend-activity"
+                          data-activity-user-id="{{ friend.id }}"
+                          data-online="{{ 'true' if friend.id in online_users else 'false' }}"
+                          data-last-active="{{ friend.last_active_at.isoformat() ~ 'Z' if friend.last_active_at else '' }}">{{ friend_activity }}</span>
+                    <a class="chat-profile-link" href="/profile/{{ friend.id }}">View profile</a>
                     <div class="typing-indicator" id="typing-indicator"></div>
                 </div>
             </div>
 
             <div class="chat-box" id="chat-box">
                 {% for m in messages %}
-                <div class="bubble {{ 'sent' if m.sender_id == current_user_id else 'received' }}"
-                     title="{{ m.timestamp.strftime('%H:%M') if m.timestamp else '' }}">{{ m.content }}</div>
+                <div class="bubble {{ 'sent' if m.sender_id == current_user_id else 'received' }}{{ ' edited' if m.edited_at else '' }}"
+                     data-message-id="{{ m.id }}"
+                     title="{{ m.timestamp.strftime('%H:%M') if m.timestamp else '' }}">
+                    <div class="message-actions">
+                        <button type="button" class="message-menu-toggle" aria-label="Message actions" aria-expanded="false">•••</button>
+                        <div class="message-action-menu" hidden>
+                            {% if m.sender_id == current_user_id %}<button type="button" data-message-action="edit">Edit</button>{% endif %}
+                            <button type="button" data-message-action="copy">Copy</button>
+                            <button type="button" data-message-action="forward">Forward</button>
+                            <button type="button" data-message-action="delete">Delete</button>
+                        </div>
+                    </div>
+                    <span class="bubble-content">{{ m.content }}</span>
+                    {% if m.sender_id == current_user_id and m.read_at %}<span class="message-receipt seen">Seen</span>
+                    {% elif m.sender_id == current_user_id and m.delivered_at %}<span class="message-receipt delivered" title="Delivered" aria-label="Delivered"></span>{% endif %}
+                </div>
                 {% endfor %}
             </div>
 
             <form class="chat-form" id="chat-form">
-                <button type="button" id="emojiBtn" title="Emoji">&#128516;</button>
+                <div class="chat-emoji-tools">
+                    <button type="button" id="emojiBtn" title="Emoji" aria-label="Choose an emoji" aria-expanded="false">&#128516;</button>
+                </div>
+                <div class="chat-emoji-picker" id="chat-emoji-picker" hidden aria-label="Choose an emoji">
+                    {% for emoji in ['🥰', '🥹', '😍', '😊', '😘', '😂', '❤️', '💖', '💕', '💗', '🦋', '🌸', '🌷', '🐻', '🐰', '🧸', '🍓', '✨', '🎀', '🌈', '☁️', '🌙', '😎', '🤔', '👏', '🎉', '🔥', '🙏', '🙌', '🌿'] %}
+                    <button type="button" class="chat-emoji-option" aria-label="{{ emoji }}">{{ emoji }}</button>
+                    {% endfor %}
+                </div>
                 <input type="text" id="messageInput" placeholder="Type a message..."
                        autocomplete="off" maxlength="2000" required>
                 <button type="submit" id="sendBtn">Send</button>
             </form>
+            <div class="chat-action-feedback" id="chat-action-feedback" aria-live="polite"></div>
+
+            <dialog class="forward-dialog" id="forward-dialog">
+                <form id="forward-form">
+                    <h3>Forward message</h3>
+                    <label for="forward-recipient">Choose a friend</label>
+                    <select id="forward-recipient" required>
+                        {% for f in friends %}<option value="{{ f.id }}">{{ f.username }}</option>{% endfor %}
+                    </select>
+                    <div class="forward-dialog-actions">
+                        <button type="button" id="forward-cancel">Cancel</button>
+                        <button type="submit">Forward</button>
+                    </div>
+                </form>
+            </dialog>
 
         </div>
 
@@ -85,7 +128,6 @@
 
 {% block scripts %}
 <!-- socket.io and the shared `socket` come from base.html -->
-<script src="https://cdn.jsdelivr.net/npm/@joeattardi/emoji-button@4.6.4/dist/index.min.js"></script>
 <script>
 const friendId = {{ friend.id }};
 
@@ -93,6 +135,17 @@ const chatBox = document.getElementById("chat-box");
 const form = document.getElementById("chat-form");
 const input = document.getElementById("messageInput");
 const typingBox = document.getElementById("typing-indicator");
+const actionFeedback = document.getElementById("chat-action-feedback");
+const forwardDialog = document.getElementById("forward-dialog");
+const forwardForm = document.getElementById("forward-form");
+let forwardingMessageId = null;
+let feedbackTimeout = null;
+
+function showActionFeedback(message) {
+    actionFeedback.textContent = message;
+    clearTimeout(feedbackTimeout);
+    feedbackTimeout = setTimeout(() => { actionFeedback.textContent = ""; }, 2500);
+}
 
 // =====================
 // JOIN ROOM
@@ -102,16 +155,168 @@ socket.emit("join", { friend_id: friendId });
 // =====================
 // RECEIVE MESSAGE
 // =====================
-function addBubble(content, mine) {
+function setReceipt(bubble, status) {
+    bubble.querySelector(".message-receipt")?.remove();
+    if (!bubble.classList.contains("sent") || status === "sent") return;
+    const receipt = document.createElement("span");
+    receipt.className = "message-receipt " + (status === "seen" ? "seen" : "delivered");
+    if (status === "seen") {
+        receipt.textContent = "Seen";
+    } else {
+        receipt.title = "Delivered";
+        receipt.setAttribute("aria-label", "Delivered");
+    }
+    bubble.appendChild(receipt);
+}
+
+function addBubble(content, mine, messageId, status = "sent") {
     const div = document.createElement("div");
     div.className = "bubble " + (mine ? "sent" : "received");
-    div.textContent = content;   // textContent, not innerHTML -> no XSS
+    div.dataset.messageId = messageId;
+    const text = document.createElement("span");
+    text.className = "bubble-content";
+    text.textContent = content;   // textContent, not innerHTML -> no XSS
+    const actions = document.createElement("div");
+    actions.className = "message-actions";
+    const toggle = document.createElement("button");
+    toggle.type = "button";
+    toggle.className = "message-menu-toggle";
+    toggle.setAttribute("aria-label", "Message actions");
+    toggle.setAttribute("aria-expanded", "false");
+    toggle.textContent = "•••";
+    actions.appendChild(toggle);
+    const menu = document.createElement("div");
+    menu.className = "message-action-menu";
+    menu.hidden = true;
+    if (mine) {
+        const edit = document.createElement("button");
+        edit.type = "button";
+        edit.dataset.messageAction = "edit";
+        edit.textContent = "Edit";
+        menu.appendChild(edit);
+    }
+    [["copy", "Copy"], ["forward", "Forward"], ["delete", "Delete"]].forEach(([action, label]) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.dataset.messageAction = action;
+        button.textContent = label;
+        menu.appendChild(button);
+    });
+    actions.appendChild(menu);
+    div.appendChild(actions);
+    div.appendChild(text);
+    if (mine) {
+        setReceipt(div, status);
+    }
     chatBox.appendChild(div);
     chatBox.scrollTop = chatBox.scrollHeight;
 }
 
 socket.on("receive_message", (data) => {
-    addBubble(data.content, data.sender_id === CURRENT_USER_ID);
+    addBubble(data.content, data.sender_id === CURRENT_USER_ID, data.id, data.receipt);
+});
+
+socket.on("receipt_update", (data) => {
+    data.message_ids.forEach((id) => {
+        const bubble = chatBox.querySelector(`[data-message-id="${id}"]`);
+        if (bubble) setReceipt(bubble, data.status);
+    });
+});
+
+socket.on("message_updated", (data) => {
+    const bubble = chatBox.querySelector(`[data-message-id="${data.id}"]`);
+    if (!bubble) return;
+    bubble.querySelector(".bubble-content").textContent = data.content;
+    bubble.classList.add("edited");
+});
+
+chatBox.addEventListener("click", (event) => {
+    const toggle = event.target.closest(".message-menu-toggle");
+    if (toggle) {
+        const thisMenu = toggle.parentElement.querySelector(".message-action-menu");
+        chatBox.querySelectorAll(".message-action-menu").forEach((menu) => {
+            if (menu !== thisMenu) {
+                menu.hidden = true;
+                menu.parentElement.querySelector(".message-menu-toggle")?.setAttribute("aria-expanded", "false");
+            }
+        });
+        thisMenu.hidden = !thisMenu.hidden;
+        toggle.setAttribute("aria-expanded", String(!thisMenu.hidden));
+        return;
+    }
+
+    const actionButton = event.target.closest("[data-message-action]");
+    if (!actionButton) return;
+    const bubble = actionButton.closest(".bubble");
+    if (!bubble) return;
+    const messageId = Number(bubble.dataset.messageId);
+    const content = bubble.querySelector(".bubble-content")?.textContent || "";
+    const action = actionButton.dataset.messageAction;
+    bubble.querySelector(".message-action-menu").hidden = true;
+    bubble.querySelector(".message-menu-toggle").setAttribute("aria-expanded", "false");
+
+    if (action === "edit") {
+        const updated = window.prompt("Edit your message", content);
+        if (updated === null || !updated.trim()) return;
+        socket.emit("edit_message", { friend_id: friendId, message_id: messageId, content: updated.trim() });
+    } else if (action === "copy") {
+        if (navigator.clipboard?.writeText) {
+            navigator.clipboard.writeText(content).then(
+                () => showActionFeedback("Message copied"),
+                () => showActionFeedback("Could not copy message")
+            );
+        } else {
+            const helper = document.createElement("textarea");
+            helper.value = content;
+            helper.style.position = "fixed";
+            helper.style.opacity = "0";
+            document.body.appendChild(helper);
+            helper.select();
+            const copied = document.execCommand("copy");
+            helper.remove();
+            showActionFeedback(copied ? "Message copied" : "Could not copy message");
+        }
+    } else if (action === "forward") {
+        forwardingMessageId = messageId;
+        forwardDialog.showModal();
+    } else if (action === "delete") {
+        if (!window.confirm("Delete this message for everyone in the chat?")) return;
+        socket.emit("delete_message", { friend_id: friendId, message_id: messageId }, (result) => {
+            if (!result?.ok) showActionFeedback("Could not delete message");
+        });
+    }
+});
+
+document.addEventListener("click", (event) => {
+    if (event.target.closest(".message-actions")) return;
+    chatBox.querySelectorAll(".message-action-menu:not([hidden])").forEach((menu) => {
+        menu.hidden = true;
+        menu.parentElement.querySelector(".message-menu-toggle")?.setAttribute("aria-expanded", "false");
+    });
+});
+
+socket.on("message_deleted", (data) => {
+    const ids = data.ids || [data.id];
+    ids.forEach((id) => chatBox.querySelector(`[data-message-id="${id}"]`)?.remove());
+});
+
+document.getElementById("forward-cancel").addEventListener("click", () => forwardDialog.close());
+forwardDialog.addEventListener("click", (event) => {
+    if (event.target === forwardDialog) forwardDialog.close();
+});
+forwardForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const targetId = Number(document.getElementById("forward-recipient").value);
+    if (!forwardingMessageId || !targetId) return;
+    socket.emit("forward_message", {
+        friend_id: friendId,
+        message_id: forwardingMessageId,
+        target_id: targetId
+    }, (result) => {
+        showActionFeedback(result?.ok ? "Message forwarded" : "Could not forward message");
+    });
+    forwardingMessageId = null;
+    forwardDialog.close();
 });
 
 // =====================
@@ -160,21 +365,37 @@ socket.on("stop_typing", () => {
     typingBox.innerText = "";
 });
 
-// =====================
-// EMOJI PICKER
-// =====================
-// Guarded: if the CDN is blocked the rest of the chat still works.
-if (typeof EmojiButton !== "undefined") {
-    const picker = new EmojiButton({ position: "top-end" });
-    const emojiBtn = document.getElementById("emojiBtn");
+// Local emoji picker works without an external script or network connection.
+const emojiBtn = document.getElementById("emojiBtn");
+const emojiPicker = document.getElementById("chat-emoji-picker");
+let emojiCursorStart = 0;
+let emojiCursorEnd = 0;
 
-    emojiBtn.addEventListener("click", () => picker.togglePicker(emojiBtn));
+emojiBtn.addEventListener("click", () => {
+    emojiCursorStart = input.selectionStart ?? input.value.length;
+    emojiCursorEnd = input.selectionEnd ?? input.value.length;
+    emojiPicker.hidden = !emojiPicker.hidden;
+    emojiBtn.setAttribute("aria-expanded", String(!emojiPicker.hidden));
+});
 
-    picker.on("emoji", (emoji) => {
-        input.value += emoji;
-        input.focus();
-    });
-}
+emojiPicker.addEventListener("click", (event) => {
+    const option = event.target.closest(".chat-emoji-option");
+    if (!option) return;
+    input.focus();
+    input.setRangeText(option.textContent, emojiCursorStart, emojiCursorEnd, "end");
+    emojiCursorStart = input.selectionStart;
+    emojiCursorEnd = input.selectionEnd;
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    emojiPicker.hidden = true;
+    emojiBtn.setAttribute("aria-expanded", "false");
+});
+
+document.addEventListener("click", (event) => {
+    if (!event.target.closest(".chat-emoji-tools")) {
+        emojiPicker.hidden = true;
+        emojiBtn.setAttribute("aria-expanded", "false");
+    }
+});
 
 // Land at the newest message on load.
 chatBox.scrollTop = chatBox.scrollHeight;

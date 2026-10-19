@@ -14,10 +14,11 @@
         {% endif %}
 
         {% for friend in friends %}
+        <div class="friend-row">
         <a href="/chat/{{ friend.id }}" class="chat-user">
 
             <!-- PROFILE PICTURE (real avatar system) -->
-            <div class="avatar">
+            <div class="avatar{% if friend.id in online_users %} is-online{% endif %}" data-user-id="{{ friend.id }}">
 
                 {% if friend.avatar_url %}
                     <img src="{{ friend.avatar_url }}" alt="avatar">
@@ -40,23 +41,69 @@
             </div>
 
         </a>
+        </div>
         {% endfor %}
 
     </div>
 
     <!-- RIGHT PANEL -->
-    <div class="main-panel">
+    <div class="main-panel friends-main-panel">
 
-        <div class="container">
+        <div class="container friends-main-container">
 
-            <h3>Welcome 👋</h3>
-            <p>Select a chat to start messaging</p>
+            {% if incoming_requests %}
+            <section class="friend-added-notice" aria-label="Friend requests">
+                <strong>Friend requests</strong>
+                {% for item in incoming_requests %}
+                <div class="friend-request-row">
+                    <span>{{ item.person.username }} wants to be your friend.</span>
+                    <div class="friend-request-actions">
+                        <form method="POST" action="/friend_request/{{ item.id }}/accept"><button type="submit">Accept</button></form>
+                        <form method="POST" action="/friend_request/{{ item.id }}/decline"><button type="submit">Decline</button></form>
+                    </div>
+                </div>
+                {% endfor %}
+            </section>
+            {% endif %}
 
-            <form method="POST" action="/add_friend" class="add-friend-form">
-                <input type="text" name="username" placeholder="Add a friend by username"
-                       autocomplete="off" required>
-                <button type="submit">Add</button>
-            </form>
+            <section class="account-directory">
+                <div class="account-directory-heading">
+                    <h3>Find people</h3>
+                    <input type="search" id="account-search" placeholder="Search people..." aria-label="Search all accounts">
+                </div>
+                <div class="account-directory-list" id="account-directory-list">
+                    {% for account in accounts %}
+                    <div class="account-directory-row" data-account-name="{{ account.username|lower }}">
+                        <div class="avatar{% if account.id in online_users %} is-online{% endif %}" data-user-id="{{ account.id }}">
+                            {% if account.avatar_url %}<img src="{{ account.avatar_url }}" alt="">
+                            {% else %}{{ account.username[0].upper() }}{% endif %}
+                        </div>
+                        <span class="account-directory-name">{{ account.username }}</span>
+                        {% if account.id in friend_ids %}
+                        <span class="account-already-friend">Already friends</span>
+                        <form method="POST" action="/remove_friend/{{ account.id }}" class="account-remove-form"
+                              onsubmit="return confirm('Remove {{ account.username }} from your friends?')">
+                            <button type="submit" aria-label="Remove {{ account.username }}" title="Remove friend">Remove</button>
+                        </form>
+                        {% elif account.id in incoming_request_by_user %}
+                        <form method="POST" action="/friend_request/{{ incoming_request_by_user[account.id] }}/accept">
+                            <button type="submit" class="account-add-button">Accept</button>
+                        </form>
+                        {% elif account.id in outgoing_ids %}
+                        <span class="account-already-friend">Request sent</span>
+                        {% else %}
+                        <form method="POST" action="/add_friend">
+                            <input type="hidden" name="username" value="{{ account.username }}">
+                            <button type="submit" class="account-add-button">Add</button>
+                        </form>
+                        {% endif %}
+                    </div>
+                    {% else %}
+                    <p>No other accounts yet.</p>
+                    {% endfor %}
+                </div>
+                <p class="account-search-empty" id="account-search-empty" hidden>No accounts match that search.</p>
+            </section>
 
             <div style="margin-top:20px; opacity:0.7;">
                 💡 Tip: online users show a glowing pink-blue dot
@@ -67,5 +114,20 @@
     </div>
 
 </div>
+
+<script>
+const accountSearch = document.getElementById("account-search");
+accountSearch?.addEventListener("input", () => {
+    const query = accountSearch.value.trim().toLocaleLowerCase();
+    const rows = [...document.querySelectorAll(".account-directory-row")];
+    let visible = 0;
+    rows.forEach((row) => {
+        const matches = row.dataset.accountName.includes(query);
+        row.hidden = !matches;
+        if (matches) visible++;
+    });
+    document.getElementById("account-search-empty").hidden = visible > 0;
+});
+</script>
 
 {% endblock %}

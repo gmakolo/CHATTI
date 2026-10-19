@@ -17,6 +17,15 @@
                 type="text" 
                 name="username" 
                 placeholder="Username" 
+                autocomplete="username"
+                required
+            >
+
+            <input
+                type="email"
+                name="email"
+                placeholder="Email address"
+                autocomplete="email"
                 required
             >
 
@@ -24,8 +33,14 @@
                 type="password" 
                 name="password" 
                 placeholder="Password" 
+                minlength="6"
+                maxlength="8"
+                pattern="([A-Za-z0-9]{6}|[A-Za-z0-9]{8})"
+                title="Use exactly 6 or 8 English letters or numbers, with no spaces or symbols"
+                autocomplete="new-password"
                 required
             >
+            <p class="password-hint">Password must be exactly 6 or 8 letters or numbers, with no spaces or symbols.</p>
 
             <button type="submit">Sign Up</button>
 

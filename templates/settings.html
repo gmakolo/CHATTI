@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+
+{% block content %}
+<main class="profile-page settings-page">
+    <section class="profile-card settings-card">
+        <p class="profile-kicker">CHATTI PREFERENCES</p>
+        <h1>Settings</h1>
+        <form method="POST" class="settings-form">
+            <fieldset>
+                <legend>How long should messages you send stay in chats?</legend>
+                <p class="settings-help">This applies to new messages you send. Timed messages are removed for everyone.</p>
+
+                {% set retention = user.message_retention or 'off' %}
+                <label class="retention-option">
+                    <input type="radio" name="message_retention" value="seen" {% if retention == 'seen' %}checked{% endif %}>
+                    <span><strong>Delete immediately after seen</strong><small>Remove when the recipient opens the chat.</small></span>
+                </label>
+                <label class="retention-option">
+                    <input type="radio" name="message_retention" value="12h" {% if retention == '12h' %}checked{% endif %}>
+                    <span><strong>Delete after 12 hours</strong><small>Counted from when you send the message.</small></span>
+                </label>
+                <label class="retention-option">
+                    <input type="radio" name="message_retention" value="24h" {% if retention == '24h' %}checked{% endif %}>
+                    <span><strong>Delete after 24 hours</strong><small>Counted from when you send the message.</small></span>
+                </label>
+                <label class="retention-option">
+                    <input type="radio" name="message_retention" value="30d" {% if retention == '30d' %}checked{% endif %}>
+                    <span><strong>Delete after 30 days</strong><small>Counted from when you send the message.</small></span>
+                </label>
+                <label class="retention-option">
+                    <input type="radio" name="message_retention" value="off" {% if retention == 'off' %}checked{% endif %}>
+                    <span><strong>Off</strong><small>Keep messages in the chat until someone deletes them.</small></span>
+                </label>
+            </fieldset>
+            <button type="submit" class="settings-save-button">Save settings</button>
+        </form>
+    </section>
+</main>
+{% endblock %}
