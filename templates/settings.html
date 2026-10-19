@@ -5,35 +5,178 @@
     <section class="profile-card settings-card">
         <p class="profile-kicker">CHATTI PREFERENCES</p>
         <h1>Settings</h1>
-        <form method="POST" class="settings-form">
-            <fieldset>
-                <legend>How long should messages you send stay in chats?</legend>
-                <p class="settings-help">This applies to new messages you send. Timed messages are removed for everyone.</p>
+        <p class="settings-intro">Make CHATTI work the way you want. Your choices are saved to your account.</p>
 
-                {% set retention = user.message_retention or 'off' %}
-                <label class="retention-option">
-                    <input type="radio" name="message_retention" value="seen" {% if retention == 'seen' %}checked{% endif %}>
-                    <span><strong>Delete immediately after seen</strong><small>Remove when the recipient opens the chat.</small></span>
-                </label>
-                <label class="retention-option">
-                    <input type="radio" name="message_retention" value="12h" {% if retention == '12h' %}checked{% endif %}>
-                    <span><strong>Delete after 12 hours</strong><small>Counted from when you send the message.</small></span>
-                </label>
-                <label class="retention-option">
-                    <input type="radio" name="message_retention" value="24h" {% if retention == '24h' %}checked{% endif %}>
-                    <span><strong>Delete after 24 hours</strong><small>Counted from when you send the message.</small></span>
-                </label>
-                <label class="retention-option">
-                    <input type="radio" name="message_retention" value="30d" {% if retention == '30d' %}checked{% endif %}>
-                    <span><strong>Delete after 30 days</strong><small>Counted from when you send the message.</small></span>
-                </label>
-                <label class="retention-option">
-                    <input type="radio" name="message_retention" value="off" {% if retention == 'off' %}checked{% endif %}>
-                    <span><strong>Off</strong><small>Keep messages in the chat until someone deletes them.</small></span>
-                </label>
-            </fieldset>
-            <button type="submit" class="settings-save-button">Save settings</button>
-        </form>
+        <section class="settings-section">
+            <form method="POST" class="settings-form">
+                <input type="hidden" name="section" value="presence">
+                <fieldset>
+                    <legend>Online status and privacy</legend>
+                    <p class="settings-help">Read receipts are separate from your online status.</p>
+                    <label class="retention-option">
+                        <input type="checkbox" name="show_online_status" {% if user.show_online_status is not false %}checked{% endif %}>
+                        <span><strong>Show when I’m active</strong><small>Friends can see when you are online.</small></span>
+                    </label>
+                    <label class="retention-option">
+                        <input type="checkbox" name="show_last_seen" {% if user.show_last_seen is not false %}checked{% endif %}>
+                        <span><strong>Show my last active time</strong><small>Friends can see when you were last online.</small></span>
+                    </label>
+                    <label class="retention-option">
+                        <input type="checkbox" name="show_read_receipts" {% if user.show_read_receipts is not false %}checked{% endif %}>
+                        <span><strong>Send read receipts</strong><small>People can see “Seen” when you read their messages.</small></span>
+                    </label>
+                </fieldset>
+                <button type="submit" class="settings-save-button">Save status privacy</button>
+            </form>
+        </section>
+
+        <section class="settings-section">
+            <form method="POST" class="settings-form">
+                <input type="hidden" name="section" value="privacy">
+                <fieldset>
+                    <legend>Who can contact you</legend>
+                    <label class="settings-field" for="allow-messages-from"><span><strong>Direct messages</strong><small>Choose who can start or continue a chat with you.</small></span>
+                        <select id="allow-messages-from" name="allow_messages_from">
+                            {% set message_access = user.allow_messages_from or 'friends' %}
+                            <option value="everyone" {% if message_access == 'everyone' %}selected{% endif %}>Everyone</option>
+                            <option value="friends" {% if message_access == 'friends' %}selected{% endif %}>Friends only</option>
+                            <option value="nobody" {% if message_access == 'nobody' %}selected{% endif %}>Nobody</option>
+                        </select>
+                    </label>
+                    <label class="settings-field" for="avatar-visibility"><span><strong>Profile picture</strong><small>Choose who can see your photo around CHATTI.</small></span>
+                        <select id="avatar-visibility" name="avatar_visibility">
+                            {% set avatar_access = user.avatar_visibility or 'everyone' %}
+                            <option value="everyone" {% if avatar_access == 'everyone' %}selected{% endif %}>Everyone</option>
+                            <option value="friends" {% if avatar_access == 'friends' %}selected{% endif %}>Friends only</option>
+                            <option value="nobody" {% if avatar_access == 'nobody' %}selected{% endif %}>Nobody</option>
+                        </select>
+                    </label>
+                    <div class="settings-field settings-not-available">
+                        <span><strong>Group invitations</strong><small>Group chats aren’t available in CHATTI yet, so there are no group invitations to control.</small></span>
+                        <span class="settings-coming-soon">Not available yet</span>
+                    </div>
+                </fieldset>
+                <button type="submit" class="settings-save-button">Save privacy choices</button>
+            </form>
+        </section>
+
+        <section class="settings-section">
+            <form method="POST" class="settings-form">
+                <input type="hidden" name="section" value="retention">
+                <fieldset>
+                    <legend>Disappearing messages</legend>
+                    <p class="settings-help">This applies to new messages you send. Timed messages are removed for everyone.</p>
+                    {% set retention = user.message_retention or 'off' %}
+                    <label class="retention-option"><input type="radio" name="message_retention" value="seen" {% if retention == 'seen' %}checked{% endif %}><span><strong>After they’re seen</strong><small>Remove as soon as the recipient opens the chat.</small></span></label>
+                    <label class="retention-option"><input type="radio" name="message_retention" value="12h" {% if retention == '12h' %}checked{% endif %}><span><strong>After 12 hours</strong><small>Counted from when you send the message.</small></span></label>
+                    <label class="retention-option"><input type="radio" name="message_retention" value="24h" {% if retention == '24h' %}checked{% endif %}><span><strong>After 24 hours</strong><small>Counted from when you send the message.</small></span></label>
+                    <label class="retention-option"><input type="radio" name="message_retention" value="30d" {% if retention == '30d' %}checked{% endif %}><span><strong>After 30 days</strong><small>Counted from when you send the message.</small></span></label>
+                    <label class="retention-option"><input type="radio" name="message_retention" value="off" {% if retention == 'off' %}checked{% endif %}><span><strong>Keep until deleted</strong><small>Messages stay in the chat until someone removes them.</small></span></label>
+                </fieldset>
+                <button type="submit" class="settings-save-button">Save message timing</button>
+            </form>
+        </section>
+
+        <section class="settings-section">
+            <form method="POST" class="settings-form">
+                <input type="hidden" name="section" value="notifications">
+                <fieldset>
+                    <legend>Notifications</legend>
+                    <label class="retention-option">
+                        <input type="checkbox" id="notifications-enabled" name="notifications_enabled" {% if user.notifications_enabled is not false %}checked{% endif %}>
+                        <span><strong>Show message notifications</strong><small>CHATTI can show browser notifications when you’re away from the page. Your browser must also allow notifications.</small></span>
+                    </label>
+                </fieldset>
+                <button type="submit" class="settings-save-button">Save notifications</button>
+            </form>
+        </section>
+
+        <section class="settings-section">
+            <form method="POST" class="settings-form">
+                <input type="hidden" name="section" value="theme">
+                <fieldset>
+                    <legend>Default chat theme</legend>
+                    <p class="settings-help">Used for chats without their own saved color.</p>
+                    <label class="settings-field" for="default-chat-theme"><span><strong>Chat color</strong><small>You can still choose a different color in any chat.</small></span>
+                        <select id="default-chat-theme" name="default_chat_theme">
+                            {% for key, theme in chat_themes.items() %}<option value="{{ key }}" {% if (user.default_chat_theme or 'forest') == key %}selected{% endif %}>{{ theme.label }}</option>{% endfor %}
+                        </select>
+                    </label>
+                </fieldset>
+                <button type="submit" class="settings-save-button">Save chat theme</button>
+            </form>
+        </section>
+
+        <section class="settings-section">
+            <form method="POST" class="settings-form settings-password-form" autocomplete="off">
+                <input type="hidden" name="section" value="password">
+                <fieldset>
+                    <legend>Change password</legend>
+                    <label class="settings-stack-field" for="current-password">Current password<input id="current-password" type="password" name="current_password" required autocomplete="current-password"></label>
+                    <label class="settings-stack-field" for="new-password">New password<input id="new-password" type="password" name="new_password" required minlength="6" maxlength="8" pattern="[A-Za-z0-9]{6}|[A-Za-z0-9]{8}" autocomplete="new-password"><small>Exactly 6 or 8 letters or numbers. No spaces or symbols.</small></label>
+                    <label class="settings-stack-field" for="confirm-password">Confirm new password<input id="confirm-password" type="password" name="confirm_password" required minlength="6" maxlength="8" pattern="[A-Za-z0-9]{6}|[A-Za-z0-9]{8}" autocomplete="new-password"></label>
+                </fieldset>
+                <button type="submit" class="settings-save-button">Update password</button>
+            </form>
+        </section>
+
+        <section class="settings-section">
+            <div class="settings-form">
+                <fieldset>
+                    <legend>Blocked accounts</legend>
+                    <p class="settings-help">Blocked accounts can’t message you or view your profile.</p>
+                    <form method="POST" action="/settings/block" class="settings-block-form">
+                        <label for="block-user">Choose an account</label>
+                        <select id="block-user" name="user_id" required>
+                            <option value="">Select a person...</option>
+                            {% for account in all_accounts if account.id not in blocked_ids %}<option value="{{ account.id }}">{{ account.username }}</option>{% endfor %}
+                        </select>
+                        <button type="submit" class="settings-save-button">Block account</button>
+                    </form>
+                    <div class="blocked-account-list">
+                        {% for person in blocked_users %}
+                        <div class="blocked-account-row"><span>{{ person.username }}</span><form method="POST" action="/settings/unblock/{{ person.id }}"><button type="submit">Unblock</button></form></div>
+                        {% else %}<p class="settings-help">You haven’t blocked anyone.</p>{% endfor %}
+                    </div>
+                </fieldset>
+            </div>
+        </section>
+
+        <section class="settings-section settings-account-section">
+            <div class="settings-account-actions"><div><h2>Log out</h2><p>Sign out of CHATTI on this device.</p></div><a href="/logout" class="settings-logout-button">Log out</a></div>
+        </section>
+
+        <details class="settings-section settings-delete-section">
+            <summary>Delete account</summary>
+            <form method="POST" class="settings-form">
+                <input type="hidden" name="section" value="delete_account">
+                <p class="settings-help">This permanently deletes your account, messages, posts, and profile data.</p>
+                <label class="settings-stack-field" for="delete-password">Current password<input id="delete-password" type="password" name="delete_password" required autocomplete="current-password"></label>
+                <label class="delete-confirm-option"><input type="checkbox" name="confirm_delete" required> I understand that my account and its data will be permanently deleted.</label>
+                <button type="submit" class="settings-delete-button" onclick="return confirm('Permanently delete your CHATTI account and its data?')">Permanently delete account</button>
+            </form>
+        </details>
     </section>
 </main>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.querySelectorAll('.settings-password-form').forEach((form) => form.addEventListener('submit', (event) => {
+    const next = form.querySelector('[name="new_password"]');
+    const confirmPassword = form.querySelector('[name="confirm_password"]');
+    if (next.value !== confirmPassword.value) {
+        event.preventDefault();
+        confirmPassword.setCustomValidity('Passwords do not match.');
+        confirmPassword.reportValidity();
+    } else confirmPassword.setCustomValidity('');
+}));
+const notificationsToggle = document.getElementById('notifications-enabled');
+notificationsToggle?.addEventListener('change', async () => {
+    if (notificationsToggle.checked && 'Notification' in window && Notification.permission === 'default') {
+        const permission = await Notification.requestPermission();
+        if (permission !== 'granted') window.alert('Allow notifications in your browser to receive CHATTI message alerts.');
+    }
+});
+</script>
 {% endblock %}

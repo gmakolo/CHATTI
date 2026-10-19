@@ -1,7 +1,64 @@
-
-
 {% extends "base.html" %}
 {% block content %}
-<h2>Welcome to CHATTI!</h2>
-<p>Head over to your <a href="/friends">Friends</a> to start chatting.</p>
+<main class="feed-page">
+    <header class="feed-heading">
+        <div>
+            <span class="feed-kicker">YOUR CHATTI SPACE</span>
+            <h1>A little closer, every day.</h1>
+            <p class="feed-greeting"><span id="time-greeting">Good afternoon</span> {{ current_user.username }} <span aria-hidden="true">🌿</span></p>
+        </div>
+        <a class="feed-updates-link" href="/status">View updates <span aria-hidden="true">↗</span></a>
+    </header>
+
+    <section class="feed-create-area" aria-labelledby="create-post-title">
+        <h2 id="create-post-title">What's on your mind today?</h2>
+        <button type="button" class="feed-create-cta" id="create-post-button"><span>＋</span> Create post</button>
+        <form class="feed-composer" id="feed-composer" method="POST" action="/posts" enctype="multipart/form-data">
+            <div class="feed-composer-top">
+                <span class="feed-avatar">{% if can_view_profile_picture(current_user) %}<img src="/avatar/{{ current_user.id }}" alt="">{% else %}{{ current_user.username[0].upper() }}{% endif %}</span>
+                <textarea name="content" maxlength="3000" placeholder="Share an idea…" aria-label="Write a post"></textarea>
+            </div>
+            <div class="feed-composer-bottom">
+                <label class="feed-media-label"><span>＋</span> Add photo or video<input type="file" name="media_file" accept="image/png,image/jpeg,image/gif,image/webp,video/mp4,video/webm"></label>
+                <span class="feed-post-persistence">Your post stays here until you delete it.</span>
+                <button type="submit">Share post</button>
+            </div>
+        </form>
+    </section>
+
+    <section class="feed-intro-card">
+        <div class="feed-intro-mark" aria-hidden="true">✳</div>
+        <div><h2>Your people, your space.</h2><p>Chat, share your dreams, learn together, and discover new opportunities.</p></div>
+        <a href="/friends#people-directory">Find your people <span aria-hidden="true">→</span></a>
+    </section>
+
+    <section class="feed-stream" aria-label="Posts">
+        <div class="feed-stream-heading"><h2>Your feed</h2><a href="/friends#people-directory">Explore people</a></div>
+        {% for item in feed_items %}{% set post = item.post %}{% set author = item.author %}
+        <article class="feed-post" id="post-{{ post.id }}">
+            <header class="feed-post-header"><a class="feed-author" href="/profile/{{ author.id }}"><span class="feed-avatar">{% if can_view_profile_picture(author) %}<img src="/avatar/{{ author.id }}" alt="">{% else %}{{ author.username[0].upper() }}{% endif %}</span><span><strong>{{ author.username }}</strong><time>{{ post.created_at.strftime('%b %d · %H:%M') }} UTC</time></span></a>{% if author.id == current_user.id %}<form method="POST" action="/posts/{{ post.id }}/delete" onsubmit="return confirm('Delete this post?')"><button class="feed-delete" type="submit" aria-label="Delete post">•••</button></form>{% endif %}</header>
+            {% if post.content %}<p class="feed-post-content">{{ post.content }}</p>{% endif %}
+            {% if post.media_url %}{% if post.media_type == 'image' %}<img class="feed-post-media" src="{{ post.media_url }}" alt="Photo shared by {{ author.username }}">{% elif post.media_type == 'video' %}<video class="feed-post-media" src="{{ post.media_url }}" controls playsinline></video>{% endif %}{% endif %}
+            <div class="feed-post-stats"><span>❤️ {{ item.reaction_counts.love }}　👍 {{ item.reaction_counts.like }}　😂 {{ item.reaction_counts.laugh }}</span><span>{{ item.comments|length }} comments</span></div>
+            <div class="feed-post-actions">{% for reaction, label, emoji in [('like','Like','👍'),('love','Love','❤️'),('laugh','Laugh','😂')] %}<form method="POST" action="/posts/{{ post.id }}/react"><input type="hidden" name="reaction" value="{{ reaction }}"><button class="feed-reaction{% if item.my_reaction == reaction %} active{% endif %}" type="submit">{{ emoji }} {{ label }}</button></form>{% endfor %}</div>
+            <div class="feed-comments">{% for comment, commenter in item.comments %}<p><strong>{{ commenter.username }}</strong> {{ comment.content }}</p>{% endfor %}</div>
+            <form class="feed-comment-form" method="POST" action="/posts/{{ post.id }}/comment"><input name="content" maxlength="1000" placeholder="Write a comment…" aria-label="Write a comment" required><button type="submit">Comment</button></form>
+        </article>
+        {% else %}<div class="feed-empty"><span>🌱</span><h2>Your feed starts here</h2><p>Share an idea or find your people to get the conversation going.</p><a href="/friends#people-directory">Explore CHATTI</a></div>{% endfor %}
+    </section>
+</main>
+{% endblock %}
+{% block scripts %}
+<script>
+const greetingHour = new Date().getHours();
+document.getElementById("time-greeting").textContent = greetingHour < 12 ? "Good morning" : greetingHour < 18 ? "Good afternoon" : "Good evening";
+document.getElementById("create-post-button").addEventListener("click", () => {
+    const composer = document.getElementById("feed-composer");
+    composer.classList.add("is-open");
+    composer.querySelector("textarea").focus();
+});
+document.querySelector("#feed-composer textarea").addEventListener("focus", () => {
+    document.getElementById("feed-composer").classList.add("is-open");
+});
+</script>
 {% endblock %}

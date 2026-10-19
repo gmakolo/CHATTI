@@ -6,28 +6,41 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600&display=swap" rel="stylesheet">
 
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=midnight-blue-1">
 </head>
 
-<body>
+<body class="{% if session.get('user_id') %}app-authenticated{% endif %}" data-notifications-enabled="{{ 'true' if current_notifications_enabled() else 'false' }}">
 
     <!-- TOP NAVBAR -->
     <nav class="navbar">
-        <span class="logo">CHATTI</span>
+        <a class="brand-lockup" href="/">
+            <span class="logo">CHATTI</span>
+            <small>A little closer, every day.</small>
+        </a>
 
-        <div class="nav-links">
+        <div class="nav-links" aria-label="Main navigation">
             {% if session.get("user_id") %}
-                <a href="/">Home</a>
-                <a href="/friends">Friends</a>
-                <a href="/status">Updates</a>
-                <a href="/profile">Profile</a>
-                <a href="/settings">Settings</a>
-                <a href="/logout">Logout</a>
+                <a class="{{ 'active' if request.path == '/' else '' }}" href="/"><span>⌂</span>Home</a>
+                <a class="{{ 'active' if request.path == '/friends' or request.path.startswith('/chat/') else '' }}" href="/friends"><span>◉</span>Chats</a>
+                <a class="{{ 'active' if request.path.startswith('/status') else '' }}" href="/status"><span>◌</span>Updates</a>
+                <a href="/friends#people-directory"><span>⌕</span>Discover</a>
+                <a class="{{ 'active' if request.path.startswith('/profile') else '' }}" href="/profile"><span>○</span>Profile</a>
+                <a class="{{ 'active' if request.path.startswith('/settings') else '' }}" href="/settings"><span>⚙</span>Settings</a>
+                <div class="nav-secondary-links">
+                    <button type="button" data-appearance-toggle aria-label="Toggle dark mode"><span>◐</span> Dark mode</button>
+                    <a href="/logout">Log out</a>
+                </div>
             {% else %}
                 <a href="/login">Login</a>
                 <a href="/signup">Signup</a>
             {% endif %}
         </div>
+        {% if session.get("user_id") %}
+        <button type="button" class="mobile-more-toggle" id="mobile-more-toggle" aria-label="More navigation" aria-expanded="false">•••</button>
+        <div class="mobile-more-menu" id="mobile-more-menu" hidden>
+            <button type="button" data-appearance-toggle><span>◐</span> Dark mode</button><a href="/logout">Log out</a>
+        </div>
+        {% endif %}
     </nav>
 
     <!-- MAIN APP WRAPPER -->
@@ -62,31 +75,124 @@
     // Anonymous visitors (login/signup) get no connection at all.
     const socket = CURRENT_USER_ID === null ? null : io();
 
+    if (socket) {
+        socket.on("inbox_message", (data) => {
+            if (Number(data.receiver_id) !== Number(CURRENT_USER_ID)) return;
+            if (document.body.dataset.notificationsEnabled !== "true") return;
+            if (document.visibilityState === "visible" && document.hasFocus()) return;
+            if (!("Notification" in window) || Notification.permission !== "granted") return;
+            const body = data.message_type === "sticker" ? "Sent you a sticker ✨" : (data.content || "New message");
+            new Notification("New CHATTI message", { body: body.slice(0, 160), tag: `chatti-message-${data.sender_id}` });
+        });
+    }
+
+    if (socket) {
+        socket.on("connect", () => {
+            const ownPresence = document.getElementById("profile-presence");
+            if (ownPresence) ownPresence.hidden = false;
+            document.getElementById("profile-avatar")?.classList.add("is-online");
+        });
+        socket.on("disconnect", () => {
+            const ownPresence = document.getElementById("profile-presence");
+            if (ownPresence) ownPresence.hidden = true;
+            document.getElementById("profile-avatar")?.classList.remove("is-online");
+        });
+    }
+
     function formatLastActive(lastActive) {
         if (!lastActive) return "Offline";
         const seconds = Math.max(0, Math.floor((Date.now() - new Date(lastActive).getTime()) / 1000));
-        if (seconds < 60) return "Just left";
+        if (seconds < 60) return "Last active just now";
         const minutes = Math.floor(seconds / 60);
-        if (minutes < 60) return `Left ${minutes} min${minutes === 1 ? "" : "s"} ago`;
+        if (minutes < 60) return `Last active ${minutes} minute${minutes === 1 ? "" : "s"} ago`;
         const hours = Math.floor(seconds / 3600);
-        if (hours < 24) return `Active ${hours}h ago`;
+        if (hours < 24) return `Last active ${hours} hour${hours === 1 ? "" : "s"} ago`;
         const days = Math.floor(seconds / 86400);
-        if (days < 14) return `Active ${days}d ago`;
+        if (days < 14) return `Last active ${days} day${days === 1 ? "" : "s"} ago`;
         const weeks = Math.floor(days / 7);
-        return `Active ${weeks} weeks ago`;
+        return `Last active ${weeks} week${weeks === 1 ? "" : "s"} ago`;
     }
 
     function refreshActivityLabels() {
         document.querySelectorAll("[data-activity-user-id]").forEach((label) => {
             if (label.dataset.online === "true") {
-                label.textContent = "Online";
+                label.textContent = "Active now";
             } else if (label.dataset.lastActive) {
                 label.textContent = formatLastActive(label.dataset.lastActive);
+            } else if (label.dataset.showLastSeen === "false") {
+                label.textContent = "Offline";
             }
         });
     }
     refreshActivityLabels();
     window.setInterval(refreshActivityLabels, 30000);
+
+    document.querySelectorAll("[data-password-toggle]").forEach((toggle) => {
+        const password = document.getElementById(toggle.dataset.passwordToggle);
+        toggle.addEventListener("change", () => {
+            password.type = toggle.checked ? "text" : "password";
+        });
+    });
+
+    document.querySelectorAll("[data-password-limit]").forEach((password) => {
+        const error = document.getElementById("password-limit-error");
+        const updatePasswordLimit = () => {
+            error.hidden = password.value.length <= 8;
+        };
+        password.addEventListener("input", updatePasswordLimit);
+        password.form.addEventListener("submit", (event) => {
+            updatePasswordLimit();
+            if (password.value.length > 8) {
+                event.preventDefault();
+                password.focus();
+            }
+        });
+    });
+
+    const emojiSearchTerms = {
+        "🥰": "love heart in love smile happy cute",
+        "🥹": "touched cry tears emotional happy",
+        "😍": "love heart eyes adore",
+        "😊": "smile happy blush",
+        "😘": "kiss love heart",
+        "😂": "laugh crying funny joy tears",
+        "❤️": "heart love red",
+        "💖": "sparkling heart love pink",
+        "💕": "two hearts love pink",
+        "💗": "growing heart love pink",
+        "🦋": "butterfly nature",
+        "🌸": "flower blossom cherry pink",
+        "🌷": "tulip flower spring",
+        "🐻": "bear animal cute",
+        "🐰": "rabbit bunny animal cute",
+        "🧸": "teddy bear toy cute",
+        "🍓": "strawberry fruit",
+        "✨": "sparkle stars magic",
+        "🎀": "bow ribbon pink cute",
+        "🌈": "rainbow colors",
+        "☁️": "cloud weather sky",
+        "🌙": "moon night",
+        "😎": "cool sunglasses smile",
+        "🤔": "thinking question",
+        "👏": "clap applause celebrate",
+        "🎉": "party celebration confetti",
+        "🔥": "fire hot lit",
+        "🙏": "pray thanks please",
+        "🙌": "celebrate hands praise",
+        "🌿": "leaf herb nature green"
+    };
+    document.querySelectorAll("[data-emoji-search]").forEach((search) => {
+        const picker = search.closest(".emoji-searchable-picker");
+        const options = picker.querySelectorAll("[data-emoji-option]");
+        search.addEventListener("input", () => {
+            const query = search.value.trim().toLocaleLowerCase();
+            options.forEach((option) => {
+                const emoji = option.textContent.trim();
+                const terms = `${emoji} ${emojiSearchTerms[emoji] || ""}`.toLocaleLowerCase();
+                option.hidden = !terms.includes(query);
+            });
+        });
+    });
 
     if (socket) {
         socket.on("user_status", (data) => {
@@ -103,10 +209,17 @@
                 avatar.classList.toggle("is-online", data.status === "online");
             });
 
+            if (Number(data.user_id) === Number(CURRENT_USER_ID)) {
+                const ownPresence = document.getElementById("profile-presence");
+                if (ownPresence) ownPresence.hidden = !socket.connected;
+                document.getElementById("profile-avatar")?.classList.toggle("is-online", socket.connected);
+            }
+
             document.querySelectorAll(`[data-activity-user-id="${data.user_id}"]`).forEach((label) => {
                 label.dataset.online = String(data.status === "online");
                 if (data.status === "offline") {
                     label.dataset.lastActive = data.last_active_at || "";
+                    if (!data.last_active_at) label.dataset.showLastSeen = "false";
                 }
             });
             refreshActivityLabels();
@@ -115,6 +228,40 @@
     </script>
 
     {% block scripts %}{% endblock %}
+
+    <script>
+    (() => {
+        const body = document.body;
+        const buttons = document.querySelectorAll("[data-appearance-toggle]");
+        const savedMode = localStorage.getItem("chatti-appearance");
+        if (savedMode === "dark") body.classList.add("dark-mode");
+        const updateLabel = () => {
+            const dark = body.classList.contains("dark-mode");
+            buttons.forEach((button) => {
+                button.innerHTML = `<span>${dark ? "☀" : "◐"}</span> ${dark ? "Light mode" : "Dark mode"}`;
+                button.setAttribute("aria-pressed", String(dark));
+            });
+        };
+        updateLabel();
+        buttons.forEach((button) => button.addEventListener("click", () => {
+            body.classList.toggle("dark-mode");
+            localStorage.setItem("chatti-appearance", body.classList.contains("dark-mode") ? "dark" : "light");
+            updateLabel();
+        }));
+        const moreButton = document.getElementById("mobile-more-toggle");
+        const moreMenu = document.getElementById("mobile-more-menu");
+        moreButton?.addEventListener("click", () => {
+            moreMenu.hidden = !moreMenu.hidden;
+            moreButton.setAttribute("aria-expanded", String(!moreMenu.hidden));
+        });
+        document.addEventListener("click", (event) => {
+            if (moreMenu && !event.target.closest("#mobile-more-menu, #mobile-more-toggle")) {
+                moreMenu.hidden = true;
+                moreButton.setAttribute("aria-expanded", "false");
+            }
+        });
+    })();
+    </script>
 
 </body>
 </html>

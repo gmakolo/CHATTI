@@ -1,59 +1,48 @@
 {% extends "base.html" %}
 
 {% block content %}
-
-<div class="chat-layout">
-
-    <!-- LEFT SIDEBAR -->
-    <div class="sidebar">
-
-        <h2>Chats</h2>
-
-        {% if friends|length == 0 %}
-            <p style="opacity:0.6;">No friends yet</p>
-        {% endif %}
-
-        {% for friend in friends %}
-        <div class="friend-row">
-        <a href="/chat/{{ friend.id }}" class="chat-user">
-
-            <!-- PROFILE PICTURE (real avatar system) -->
-            <div class="avatar{% if friend.id in online_users %} is-online{% endif %}" data-user-id="{{ friend.id }}">
-
-                {% if friend.avatar_url %}
-                    <img src="{{ friend.avatar_url }}" alt="avatar">
-                {% else %}
-                    {{ friend.username[0].upper() }}
-                {% endif %}
-
-            </div>
-
-            <div class="user-info">
-
-                <div class="name-row">
-                    <span>{{ friend.username }}</span>
-
-                    <span class="status-dot {{ 'online' if friend.id in online_users else 'offline' }}"
-                          data-user-id="{{ friend.id }}"></span>
-                </div>
-
-                <small class="preview">Tap to chat 💬</small>
-            </div>
-
-        </a>
+<main class="chat-layout conversations-layout">
+    <aside class="sidebar conversation-sidebar" aria-label="Conversations">
+        <div class="conversation-heading">
+            <div><p>YOUR PEOPLE</p><h1>Chats</h1></div>
+            <span class="conversation-count">{{ conversations|length }}</span>
         </div>
-        {% endfor %}
+        <label class="conversation-search-wrap" for="conversation-search">
+            <span aria-hidden="true">⌕</span>
+            <input type="search" id="conversation-search" placeholder="Search conversations..." autocomplete="off">
+        </label>
+        <div class="conversation-list" id="conversation-list">
+            {% for item in conversations %}{% set friend = item.friend %}
+            <a href="/chat/{{ friend.id }}" class="conversation-row" data-conversation-search="{{ (friend.username ~ ' ' ~ item.preview)|lower }}">
+                <div class="avatar conversation-avatar{% if friend.id in online_users %} is-online{% endif %}" data-user-id="{{ friend.id }}">
+                    {% if can_view_profile_picture(friend) %}<img src="/avatar/{{ friend.id }}" alt="">{% else %}{{ friend.username[0].upper() }}{% endif %}
+                </div>
+                <div class="conversation-copy">
+                    <div class="conversation-name-line"><strong>{{ friend.username }}</strong><time>{{ item.time_label }}</time></div>
+                    <div class="conversation-preview-line">
+                        <span class="conversation-preview">{{ item.preview }}</span>
+                        {% if item.unread_count %}<span class="conversation-unread" aria-label="{{ item.unread_count }} unread messages">{{ item.unread_count if item.unread_count < 100 else '99+' }}</span>{% endif %}
+                    </div>
+                </div>
+            </a>
+            {% else %}
+            <div class="conversation-empty"><span>☘</span><strong>Your chats will appear here</strong><p>Add a friend or start a conversation to get going.</p></div>
+            {% endfor %}
+            <p class="conversation-search-empty" id="conversation-search-empty" hidden>No conversations match that search.</p>
+        </div>
+        <a class="conversation-discover-link" href="#people-directory" data-open-people-tab="discover">＋ Find people</a>
+    </aside>
 
-    </div>
-
-    <!-- RIGHT PANEL -->
-    <div class="main-panel friends-main-panel">
-
+    <section class="main-panel friends-main-panel">
         <div class="container friends-main-container">
+            <header class="people-page-heading">
+                <div><p>YOUR CHATTI COMMUNITY</p><h2>People</h2></div>
+                <span>Your space to connect.</span>
+            </header>
 
             {% if incoming_requests %}
             <section class="friend-added-notice" aria-label="Friend requests">
-                <strong>Friend requests</strong>
+                <strong>Friend requests <span>{{ incoming_requests|length }}</span></strong>
                 {% for item in incoming_requests %}
                 <div class="friend-request-row">
                     <span>{{ item.person.username }} wants to be your friend.</span>
@@ -66,68 +55,106 @@
             </section>
             {% endif %}
 
-            <section class="account-directory">
-                <div class="account-directory-heading">
-                    <h3>Find people</h3>
-                    <input type="search" id="account-search" placeholder="Search people..." aria-label="Search all accounts">
+            <section class="account-directory" id="people-directory">
+                <div class="account-directory-heading people-directory-heading">
+                    <div><h3>Find people</h3><p>Keep up with friends or discover someone new.</p></div>
+                    <input type="search" id="account-search" placeholder="Search people..." aria-label="Search people" autocomplete="off">
                 </div>
-                <div class="account-directory-list" id="account-directory-list">
-                    {% for account in accounts %}
+                <div class="people-tabs" role="tablist" aria-label="People">
+                    <button type="button" class="people-tab active" id="friends-tab" role="tab" aria-selected="true" aria-controls="friends-panel" data-people-tab="friends">Friends <span>{{ friends|length }}</span></button>
+                    <button type="button" class="people-tab" id="discover-tab" role="tab" aria-selected="false" aria-controls="discover-panel" data-people-tab="discover">Discover <span>{{ discover_accounts|length }}</span></button>
+                </div>
+
+                <div class="account-directory-list people-panel" id="friends-panel" role="tabpanel" aria-labelledby="friends-tab" data-people-panel="friends">
+                    {% for friend in friends %}
+                    <div class="account-directory-row people-friend-row" data-account-name="{{ friend.username|lower }}">
+                        <a class="people-person-link" href="/chat/{{ friend.id }}">
+                            <div class="avatar{% if friend.id in online_users %} is-online{% endif %}" data-user-id="{{ friend.id }}">{% if can_view_profile_picture(friend) %}<img src="/avatar/{{ friend.id }}" alt="">{% else %}{{ friend.username[0].upper() }}{% endif %}</div>
+                            <span class="account-directory-name">{{ friend.username }}</span>
+                        </a>
+                        <span class="friend-connected-label">Friends <b>✓</b></span>
+                        <form method="POST" action="/remove_friend/{{ friend.id }}" class="account-remove-form" onsubmit="return confirm('Remove {{ friend.username }} from your friends?')">
+                            <button type="submit" aria-label="Remove {{ friend.username }}" title="Remove friend">Remove</button>
+                        </form>
+                    </div>
+                    {% else %}<p class="people-empty">No friends yet. Open Discover to find people.</p>{% endfor %}
+                </div>
+
+                <div class="account-directory-list people-panel" id="discover-panel" role="tabpanel" aria-labelledby="discover-tab" data-people-panel="discover" hidden>
+                    {% for account in discover_accounts %}
                     <div class="account-directory-row" data-account-name="{{ account.username|lower }}">
                         <div class="avatar{% if account.id in online_users %} is-online{% endif %}" data-user-id="{{ account.id }}">
-                            {% if account.avatar_url %}<img src="{{ account.avatar_url }}" alt="">
-                            {% else %}{{ account.username[0].upper() }}{% endif %}
+                            {% if can_view_profile_picture(account) %}<img src="/avatar/{{ account.id }}" alt="">{% else %}{{ account.username[0].upper() }}{% endif %}
                         </div>
                         <span class="account-directory-name">{{ account.username }}</span>
-                        {% if account.id in friend_ids %}
-                        <span class="account-already-friend">Already friends</span>
-                        <form method="POST" action="/remove_friend/{{ account.id }}" class="account-remove-form"
-                              onsubmit="return confirm('Remove {{ account.username }} from your friends?')">
-                            <button type="submit" aria-label="Remove {{ account.username }}" title="Remove friend">Remove</button>
-                        </form>
-                        {% elif account.id in incoming_request_by_user %}
-                        <form method="POST" action="/friend_request/{{ incoming_request_by_user[account.id] }}/accept">
-                            <button type="submit" class="account-add-button">Accept</button>
-                        </form>
+                        {% if account.id in incoming_request_by_user %}
+                        <form method="POST" action="/friend_request/{{ incoming_request_by_user[account.id] }}/accept"><button type="submit" class="account-add-button">Accept</button></form>
                         {% elif account.id in outgoing_ids %}
                         <span class="account-already-friend">Request sent</span>
                         {% else %}
+                        {% if account.allow_messages_from == 'everyone' %}<a class="account-add-button" href="/chat/{{ account.id }}">Message</a>{% endif %}
                         <form method="POST" action="/add_friend">
                             <input type="hidden" name="username" value="{{ account.username }}">
-                            <button type="submit" class="account-add-button">Add</button>
+                            <button type="submit" class="account-add-button">Add Friend</button>
                         </form>
                         {% endif %}
                     </div>
-                    {% else %}
-                    <p>No other accounts yet.</p>
-                    {% endfor %}
+                    {% else %}<p class="people-empty">No new people to discover right now.</p>{% endfor %}
                 </div>
-                <p class="account-search-empty" id="account-search-empty" hidden>No accounts match that search.</p>
+                <p class="account-search-empty" id="account-search-empty" hidden>No people match that search.</p>
             </section>
-
-            <div style="margin-top:20px; opacity:0.7;">
-                💡 Tip: online users show a glowing pink-blue dot
-            </div>
-
         </div>
-
-    </div>
-
-</div>
+    </section>
+</main>
 
 <script>
+const conversationSearch = document.getElementById("conversation-search");
+conversationSearch?.addEventListener("input", () => {
+    const query = conversationSearch.value.trim().toLocaleLowerCase();
+    const rows = [...document.querySelectorAll(".conversation-row")];
+    let visible = 0;
+    rows.forEach((row) => {
+        const matches = row.dataset.conversationSearch.includes(query);
+        row.hidden = !matches;
+        if (matches) visible++;
+    });
+    document.getElementById("conversation-search-empty").hidden = visible > 0 || rows.length === 0;
+});
+
 const accountSearch = document.getElementById("account-search");
-accountSearch?.addEventListener("input", () => {
-    const query = accountSearch.value.trim().toLocaleLowerCase();
-    const rows = [...document.querySelectorAll(".account-directory-row")];
+const peopleTabs = [...document.querySelectorAll("[data-people-tab]")];
+const peoplePanels = [...document.querySelectorAll("[data-people-panel]")];
+function selectPeopleTab(name) {
+    peopleTabs.forEach((tab) => {
+        const active = tab.dataset.peopleTab === name;
+        tab.classList.toggle("active", active);
+        tab.setAttribute("aria-selected", String(active));
+    });
+    peoplePanels.forEach((panel) => { panel.hidden = panel.dataset.peoplePanel !== name; });
+    if (accountSearch) accountSearch.placeholder = name === "friends" ? "Search friends..." : "Search people...";
+    filterPeople();
+}
+function filterPeople() {
+    const query = accountSearch?.value.trim().toLocaleLowerCase() || "";
+    const panel = peoplePanels.find((item) => !item.hidden);
+    const rows = panel ? [...panel.querySelectorAll(".account-directory-row")] : [];
     let visible = 0;
     rows.forEach((row) => {
         const matches = row.dataset.accountName.includes(query);
         row.hidden = !matches;
         if (matches) visible++;
     });
-    document.getElementById("account-search-empty").hidden = visible > 0;
-});
+    document.getElementById("account-search-empty").hidden = visible > 0 || rows.length === 0;
+}
+peopleTabs.forEach((tab) => tab.addEventListener("click", () => selectPeopleTab(tab.dataset.peopleTab)));
+accountSearch?.addEventListener("input", filterPeople);
+document.querySelectorAll("[data-open-people-tab]").forEach((link) => link.addEventListener("click", () => {
+    const requested = link.dataset.openPeopleTab;
+    const tab = peopleTabs.find((button) => button.dataset.peopleTab === requested);
+    if (tab) selectPeopleTab(requested);
+}));
+if (window.location.hash === "#people-directory" || window.location.hash === "#discover-panel") {
+    selectPeopleTab("discover");
+}
 </script>
-
 {% endblock %}

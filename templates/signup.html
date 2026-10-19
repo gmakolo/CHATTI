@@ -29,17 +29,12 @@
                 required
             >
 
-            <input 
-                type="password" 
-                name="password" 
-                placeholder="Password" 
-                minlength="6"
-                maxlength="8"
-                pattern="([A-Za-z0-9]{6}|[A-Za-z0-9]{8})"
-                title="Use exactly 6 or 8 English letters or numbers, with no spaces or symbols"
-                autocomplete="new-password"
-                required
-            >
+            <div class="password-input-row signup-password-row">
+                <input id="signup-password" type="password" name="password" placeholder="Password"
+                       autocomplete="new-password" required data-password-limit>
+                <label class="show-password"><input type="checkbox" data-password-toggle="signup-password"> Show</label>
+            </div>
+            <small class="password-limit-error" id="password-limit-error" hidden>Password cannot be more than 8 characters.</small>
             <p class="password-hint">Password must be exactly 6 or 8 letters or numbers, with no spaces or symbols.</p>
 
             <button type="submit">Sign Up</button>

@@ -17,8 +17,8 @@
         <a href="/chat/{{ f.id }}" class="chat-user{% if f.id == friend.id %} active{% endif %}">
 
             <div class="avatar{% if f.id in online_users %} is-online{% endif %}" data-user-id="{{ f.id }}">
-                {% if f.avatar_url %}
-                    <img src="{{ f.avatar_url }}" alt="">
+                    {% if can_view_profile_picture(f) %}
+                    <img src="/avatar/{{ f.id }}" alt="">
                 {% else %}
                     {{ f.username[0].upper() }}
                 {% endif %}
@@ -40,50 +40,82 @@
     <!-- RIGHT PANEL -->
     <div class="main-panel">
 
-        <div class="container">
+        <div class="container chat-theme-container" id="chat-theme-container"
+             style="--chat-bg: {{ chat_theme.bg }}; --chat-sent: {{ chat_theme.sent }}; --chat-received: {{ chat_theme.received }}; --chat-accent: {{ chat_theme.accent }};">
 
             <div class="chat-header">
                 <a href="/friends" class="back-link" title="All chats">&#8249;</a>
 
-                <a href="/profile/{{ friend.id }}" class="chat-profile-avatar-link" title="View {{ friend.username }}'s profile">
-                <div class="avatar chat-avatar{% if friend.id in online_users %} is-online{% endif %}" data-user-id="{{ friend.id }}">
-                    {% if friend.avatar_url %}
-                        <img src="{{ friend.avatar_url }}" alt="">
-                    {% else %}
-                        {{ friend.username[0].upper() }}
-                    {% endif %}
+                <div class="chat-avatar-control">
+                    <a class="chat-profile-avatar-link" id="chat-profile-avatar-link"
+                       href="{{ url_for('profile', user_id=friend.id, from_chat=friend.id) }}"
+                       title="View {{ friend.username }}’s profile" aria-label="View {{ friend.username }}’s profile">
+                    <div class="avatar chat-avatar{% if friend.id in online_users %} is-online{% endif %}" data-user-id="{{ friend.id }}">
+                        {% if can_view_profile_picture(friend) %}
+                            <img src="/avatar/{{ friend.id }}" alt="">
+                        {% else %}
+                            {{ friend.username[0].upper() }}
+                        {% endif %}
+                    </div>
+                    </a>
+                    <button type="button" class="chat-theme-toggle" id="chat-theme-toggle"
+                            aria-label="Open chat color settings" aria-expanded="false" title="Chat settings">⚙</button>
                 </div>
-                </a>
 
                 <div class="chat-header-info">
-                    <a class="chat-profile-name" href="/profile/{{ friend.id }}">{{ friend.username }}</a>
-                    <span class="status-dot {{ 'online' if friend.id in online_users else 'offline' }}"
-                          data-user-id="{{ friend.id }}"></span>
+                    <div class="chat-header-identity">
+                        <a class="chat-profile-name" href="{{ url_for('profile', user_id=friend.id, from_chat=friend.id) }}">{{ friend.username }}</a>
+                        <span class="status-dot {{ 'online' if friend.id in online_users else 'offline' }}"
+                              data-user-id="{{ friend.id }}"></span>
+                    </div>
                     <span class="chat-activity" id="friend-activity"
                           data-activity-user-id="{{ friend.id }}"
                           data-online="{{ 'true' if friend.id in online_users else 'false' }}"
-                          data-last-active="{{ friend.last_active_at.isoformat() ~ 'Z' if friend.last_active_at else '' }}">{{ friend_activity }}</span>
-                    <a class="chat-profile-link" href="/profile/{{ friend.id }}">View profile</a>
+                          data-show-last-seen="{{ 'true' if friend.show_last_seen is not false else 'false' }}"
+                          data-last-active="{{ friend.last_active_at.isoformat() ~ 'Z' if friend.last_active_at and friend.show_last_seen is not false else '' }}">{{ friend_activity }}</span>
+                    <a class="chat-profile-link" href="{{ url_for('profile', user_id=friend.id, from_chat=friend.id) }}">View profile</a>
                     <div class="typing-indicator" id="typing-indicator"></div>
                 </div>
             </div>
 
+            <section class="chat-settings-panel" id="chat-settings-panel" hidden aria-label="Chat color settings">
+                <div class="chat-settings-heading">
+                    <strong>Chat color</strong>
+                    <button type="button" id="chat-settings-close" aria-label="Close chat settings">×</button>
+                </div>
+                <div class="chat-theme-options">
+                    {% for key, theme in chat_themes.items() %}
+                    <button type="button" class="chat-theme-option{% if key == chat_theme_name %} selected{% endif %}"
+                            data-theme="{{ key }}" data-bg="{{ theme.bg }}" data-sent="{{ theme.sent }}"
+                            data-received="{{ theme.received }}" data-accent="{{ theme.accent }}"
+                            aria-label="{{ theme.label }} theme" title="{{ theme.label }}">
+                        <span class="chat-theme-swatch" style="--swatch-bg: {{ theme.bg }}; --swatch-sent: {{ theme.sent }};"></span>
+                        <span>{{ theme.label }}</span>
+                    </button>
+                    {% endfor %}
+                </div>
+            </section>
+
             <div class="chat-box" id="chat-box">
                 {% for m in messages %}
-                <div class="bubble {{ 'sent' if m.sender_id == current_user_id else 'received' }}{{ ' edited' if m.edited_at else '' }}"
+                <div class="bubble {{ 'sent' if m.sender_id == current_user_id else 'received' }}{{ ' edited' if m.edited_at else '' }}{{ ' sticker-bubble' if m.message_type == 'sticker' else '' }}"
                      data-message-id="{{ m.id }}"
                      title="{{ m.timestamp.strftime('%H:%M') if m.timestamp else '' }}">
                     <div class="message-actions">
                         <button type="button" class="message-menu-toggle" aria-label="Message actions" aria-expanded="false">•••</button>
                         <div class="message-action-menu" hidden>
-                            {% if m.sender_id == current_user_id %}<button type="button" data-message-action="edit">Edit</button>{% endif %}
+                            {% if m.sender_id == current_user_id and m.message_type != 'sticker' %}<button type="button" data-message-action="edit">Edit</button>{% endif %}
                             <button type="button" data-message-action="copy">Copy</button>
                             <button type="button" data-message-action="forward">Forward</button>
                             <button type="button" data-message-action="delete">Delete</button>
                         </div>
                     </div>
-                    <span class="bubble-content">{{ m.content }}</span>
-                    {% if m.sender_id == current_user_id and m.read_at %}<span class="message-receipt seen">Seen</span>
+                    {% if m.message_type == 'sticker' %}{% set sticker = sticker_map.get(m.content|int) %}
+                        <span class="bubble-content sticker-render" aria-label="{{ sticker.name if sticker else 'Sticker' }}">
+                            {% if sticker and sticker.sticker_type == 'image' %}<img src="{{ sticker.value }}" alt="{{ sticker.name }}" loading="lazy">{% elif sticker %}{{ sticker.value }}{% else %}Sticker unavailable{% endif %}
+                        </span>
+                    {% else %}<span class="bubble-content">{{ m.content }}</span>{% endif %}
+                    {% if m.sender_id == current_user_id and m.read_at and not m.read_receipt_hidden %}<span class="message-receipt seen">Seen</span>
                     {% elif m.sender_id == current_user_id and m.delivered_at %}<span class="message-receipt delivered" title="Delivered" aria-label="Delivered"></span>{% endif %}
                 </div>
                 {% endfor %}
@@ -92,12 +124,49 @@
             <form class="chat-form" id="chat-form">
                 <div class="chat-emoji-tools">
                     <button type="button" id="emojiBtn" title="Emoji" aria-label="Choose an emoji" aria-expanded="false">&#128516;</button>
+                    <button type="button" id="stickerBtn" title="Stickers" aria-label="Choose a sticker" aria-expanded="false">✿</button>
                 </div>
-                <div class="chat-emoji-picker" id="chat-emoji-picker" hidden aria-label="Choose an emoji">
-                    {% for emoji in ['🥰', '🥹', '😍', '😊', '😘', '😂', '❤️', '💖', '💕', '💗', '🦋', '🌸', '🌷', '🐻', '🐰', '🧸', '🍓', '✨', '🎀', '🌈', '☁️', '🌙', '😎', '🤔', '👏', '🎉', '🔥', '🙏', '🙌', '🌿'] %}
-                    <button type="button" class="chat-emoji-option" aria-label="{{ emoji }}">{{ emoji }}</button>
-                    {% endfor %}
+                <div class="chat-emoji-picker emoji-searchable-picker" id="chat-emoji-picker" hidden aria-label="Choose an emoji">
+                    <input type="search" class="emoji-search" data-emoji-search placeholder="Search emojis..." aria-label="Search emojis">
+                    <div class="chat-emoji-grid">
+                        {% for emoji in ['🥰', '🥹', '😍', '😊', '😘', '😂', '❤️', '💖', '💕', '💗', '🦋', '🌸', '🌷', '🐻', '🐰', '🧸', '🍓', '✨', '🎀', '🌈', '☁️', '🌙', '😎', '🤔', '👏', '🎉', '🔥', '🙏', '🙌', '🌿'] %}
+                        <button type="button" class="chat-emoji-option" data-emoji-option aria-label="{{ emoji }}">{{ emoji }}</button>
+                        {% endfor %}
+                    </div>
                 </div>
+                <section class="sticker-picker" id="sticker-picker" hidden aria-label="Sticker library">
+                    <header><strong>Stickers</strong><button type="button" id="sticker-picker-close" aria-label="Close stickers">×</button></header>
+                    <input type="search" id="sticker-search" placeholder="Search stickers" aria-label="Search stickers">
+                    <nav class="sticker-tabs" aria-label="Sticker packs">
+                        {% for pack in ['All', 'Favorites', 'Recent'] %}<button type="button" data-sticker-pack="{{ pack }}">{{ pack }}</button>{% endfor %}
+                        {% set pack_names = namespace(values=[]) %}{% for sticker in stickers %}{% if sticker.pack not in pack_names.values %}{% set _ = pack_names.values.append(sticker.pack) %}{% endif %}{% endfor %}
+                        {% for pack in pack_names.values %}<button type="button" data-sticker-pack="{{ pack }}">{{ pack }}</button>{% endfor %}
+                    </nav>
+                    <div class="sticker-pack-actions" id="sticker-pack-actions" hidden>
+                        <button type="button" id="sticker-pack-share">Share pack with {{ friend.username }}</button>
+                        <button type="button" id="sticker-pack-delete">Remove pack</button>
+                    </div>
+                    <div class="sticker-grid" id="sticker-grid">
+                        {% for sticker in stickers %}{% set pref = sticker_preferences.get(sticker.id) %}
+                        <div class="sticker-item" data-sticker-item data-id="{{ sticker.id }}" data-name="{{ sticker.name }}" data-keywords="{{ sticker.keywords }}" data-pack="{{ sticker.pack }}" data-favorite="{{ 'true' if pref and pref.favorite else 'false' }}" data-recent="{{ 'true' if pref and pref.recent_at else 'false' }}" data-value="{{ sticker.value }}" data-type="{{ sticker.sticker_type }}" data-owner="{{ sticker.owner_id or '' }}">
+                            <button type="button" class="sticker-send" data-sticker-send aria-label="Send {{ sticker.name }}" title="{{ sticker.name }}">
+                                {% if sticker.sticker_type == 'image' %}<img src="{{ sticker.value }}" alt="" loading="lazy">{% else %}<span>{{ sticker.value }}</span>{% endif %}
+                            </button>
+                            <button type="button" class="sticker-favorite{% if pref and pref.favorite %} active{% endif %}" data-sticker-favorite aria-label="Toggle favorite">{{ '★' if pref and pref.favorite else '☆' }}</button>
+                            {% if sticker.owner_id == current_user_id %}<button type="button" data-sticker-delete aria-label="Remove my sticker">×</button>{% elif sticker.owner_id %}<button type="button" data-sticker-report aria-label="Report sticker">⚑</button>{% endif %}
+                        </div>
+                        {% endfor %}
+                    </div>
+                    <div class="sticker-upload-row">
+                        <label for="sticker-upload-name">Name</label><input type="text" id="sticker-upload-name" maxlength="80" placeholder="My sticker">
+                        <label for="sticker-upload-keywords">Search words</label><input type="text" id="sticker-upload-keywords" maxlength="255" placeholder="happy, love…">
+                        <label for="sticker-upload-pack">Pack name</label><input type="text" id="sticker-upload-pack" maxlength="60" placeholder="My stickers">
+                        <input type="file" id="sticker-upload-file" accept="image/png,image/jpeg,image/webp,image/gif" hidden>
+                        <div class="sticker-crop-editor" id="sticker-crop-editor" hidden><div class="sticker-crop-frame"><img id="sticker-crop-preview" alt="Sticker crop preview"></div><label for="sticker-crop-zoom">Crop</label><input type="range" id="sticker-crop-zoom" min="1" max="2.5" step="0.05" value="1"></div>
+                        <button type="button" id="sticker-upload-button">＋ Create from photo</button>
+                        <small>PNG, JPG, WebP or animated GIF · max 5 MB. Crop photos before saving.</small>
+                    </div>
+                </section>
                 <input type="text" id="messageInput" placeholder="Type a message..."
                        autocomplete="off" maxlength="2000" required>
                 <button type="submit" id="sendBtn">Send</button>
@@ -147,6 +216,62 @@ function showActionFeedback(message) {
     feedbackTimeout = setTimeout(() => { actionFeedback.textContent = ""; }, 2500);
 }
 
+const chatThemeToggle = document.getElementById("chat-theme-toggle");
+const chatSettingsPanel = document.getElementById("chat-settings-panel");
+const chatThemeContainer = document.getElementById("chat-theme-container");
+
+function applyChatTheme(option) {
+    const colors = {
+        "--chat-bg": option.dataset.bg,
+        "--chat-sent": option.dataset.sent,
+        "--chat-received": option.dataset.received,
+        "--chat-accent": option.dataset.accent
+    };
+    Object.entries(colors).forEach(([name, value]) => chatThemeContainer.style.setProperty(name, value));
+    chatBox.style.setProperty("background-color", option.dataset.bg, "important");
+    chatThemeContainer.querySelector(".chat-header").style.setProperty("background-color", option.dataset.bg, "important");
+    chatThemeContainer.querySelector("#sendBtn").style.setProperty("background-color", option.dataset.accent, "important");
+    chatBox.querySelectorAll(".bubble.sent").forEach((bubble) => bubble.style.setProperty("background-color", option.dataset.sent, "important"));
+    chatBox.querySelectorAll(".bubble.received").forEach((bubble) => bubble.style.setProperty("background-color", option.dataset.received, "important"));
+}
+
+const initialTheme = chatSettingsPanel.querySelector(".chat-theme-option.selected") || chatSettingsPanel.querySelector(".chat-theme-option");
+if (initialTheme) applyChatTheme(initialTheme);
+
+chatThemeToggle.addEventListener("click", () => {
+    chatSettingsPanel.hidden = !chatSettingsPanel.hidden;
+    chatThemeToggle.setAttribute("aria-expanded", String(!chatSettingsPanel.hidden));
+});
+document.getElementById("chat-settings-close").addEventListener("click", () => {
+    chatSettingsPanel.hidden = true;
+    chatThemeToggle.setAttribute("aria-expanded", "false");
+});
+chatSettingsPanel.addEventListener("click", async (event) => {
+    const option = event.target.closest(".chat-theme-option");
+    if (!option) return;
+    const response = await fetch(`/chat/${friendId}/theme`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ theme: option.dataset.theme })
+    });
+    const result = await response.json();
+    if (!response.ok || !result.ok) {
+        showActionFeedback("Could not save chat color");
+        return;
+    }
+    applyChatTheme(option);
+    chatSettingsPanel.querySelectorAll(".chat-theme-option").forEach((button) => {
+        button.classList.toggle("selected", button === option);
+    });
+    showActionFeedback("Chat color saved");
+});
+document.addEventListener("click", (event) => {
+    if (!event.target.closest(".chat-settings-panel, #chat-theme-toggle")) {
+        chatSettingsPanel.hidden = true;
+        chatThemeToggle.setAttribute("aria-expanded", "false");
+    }
+});
+
 // =====================
 // JOIN ROOM
 // =====================
@@ -169,13 +294,35 @@ function setReceipt(bubble, status) {
     bubble.appendChild(receipt);
 }
 
-function addBubble(content, mine, messageId, status = "sent") {
+function renderSticker(span, sticker) {
+    span.classList.add("sticker-render");
+    span.replaceChildren();
+    if (!sticker) {
+        span.textContent = "Sticker unavailable";
+    } else if (sticker.type === "image") {
+        const image = document.createElement("img");
+        image.src = sticker.value;
+        image.alt = sticker.name || "Shared sticker";
+        image.loading = "lazy";
+        span.appendChild(image);
+    } else {
+        span.textContent = sticker.value;
+    }
+}
+
+function addBubble(content, mine, messageId, status = "sent", messageType = "text", sticker = null) {
     const div = document.createElement("div");
     div.className = "bubble " + (mine ? "sent" : "received");
+    const activeTheme = chatSettingsPanel.querySelector(".chat-theme-option.selected");
+    if (activeTheme) div.style.setProperty("background-color", mine ? activeTheme.dataset.sent : activeTheme.dataset.received, "important");
+    if (messageType === "sticker") div.classList.add("sticker-bubble");
     div.dataset.messageId = messageId;
     const text = document.createElement("span");
     text.className = "bubble-content";
-    text.textContent = content;   // textContent, not innerHTML -> no XSS
+    if (messageType === "sticker") renderSticker(text, sticker);
+    else text.textContent = content;   // textContent, not innerHTML -> no XSS
+    div.dataset.messageType = messageType;
+    div.dataset.content = content;
     const actions = document.createElement("div");
     actions.className = "message-actions";
     const toggle = document.createElement("button");
@@ -188,7 +335,7 @@ function addBubble(content, mine, messageId, status = "sent") {
     const menu = document.createElement("div");
     menu.className = "message-action-menu";
     menu.hidden = true;
-    if (mine) {
+    if (mine && messageType !== "sticker") {
         const edit = document.createElement("button");
         edit.type = "button";
         edit.dataset.messageAction = "edit";
@@ -212,8 +359,49 @@ function addBubble(content, mine, messageId, status = "sent") {
     chatBox.scrollTop = chatBox.scrollHeight;
 }
 
+function addStickerItem(sticker, favorite = false) {
+    if (stickerGrid.querySelector(`[data-id="${sticker.id}"]`)) return;
+    const item = document.createElement("div");
+    item.className = "sticker-item";
+    item.dataset.stickerItem = "";
+    Object.assign(item.dataset, { id: sticker.id, name: sticker.name, keywords: sticker.keywords || "",
+        pack: sticker.pack || "Shared stickers", favorite: String(favorite), recent: "false",
+        value: sticker.value, type: sticker.type, owner: sticker.owner_id ?? "" });
+    const send = document.createElement("button");
+    send.type = "button"; send.className = "sticker-send"; send.dataset.stickerSend = "";
+    send.setAttribute("aria-label", `Send ${sticker.name}`);
+    if (sticker.type === "image") {
+        const image = document.createElement("img"); image.src = sticker.value; image.alt = ""; image.loading = "lazy"; send.appendChild(image);
+    } else {
+        const glyph = document.createElement("span"); glyph.textContent = sticker.value; send.appendChild(glyph);
+    }
+    const star = document.createElement("button");
+    star.type = "button"; star.className = "sticker-favorite" + (favorite ? " active" : "");
+    star.dataset.stickerFavorite = ""; star.setAttribute("aria-label", "Toggle favorite"); star.textContent = favorite ? "★" : "☆";
+    item.append(send, star);
+    if (sticker.owner_id && Number(sticker.owner_id) !== CURRENT_USER_ID) {
+        const report = document.createElement("button"); report.type = "button";
+        report.dataset.stickerReport = ""; report.setAttribute("aria-label", "Report sticker"); report.textContent = "⚑"; item.appendChild(report);
+    }
+    stickerGrid.prepend(item);
+    return item;
+}
+
 socket.on("receive_message", (data) => {
-    addBubble(data.content, data.sender_id === CURRENT_USER_ID, data.id, data.receipt);
+    addBubble(data.content, data.sender_id === CURRENT_USER_ID, data.id, data.receipt, data.message_type || "text", data.sticker);
+    if (data.message_type === "sticker" && data.sticker) {
+        const item = addStickerItem(data.sticker, false) || stickerGrid.querySelector(`[data-id="${data.sticker.id}"]`);
+        if (item) item.dataset.recent = "true";
+        filterStickers();
+    }
+});
+socket.on("sticker_pack_shared", (data) => {
+    if (data.sender_id === CURRENT_USER_ID) return;
+    (data.stickers || []).forEach((sticker) => {
+        addStickerItem(sticker, false);
+        ensureStickerPackTab(sticker.pack);
+    });
+    showActionFeedback("A sticker pack was shared with you");
 });
 
 socket.on("receipt_update", (data) => {
@@ -357,7 +545,7 @@ input.addEventListener("input", () => {
 
 socket.on("typing", (data) => {
     if (data.user !== CURRENT_USER_ID) {
-        typingBox.innerText = "typing...";
+        typingBox.textContent = {{ (friend.username ~ ' is typing...')|tojson }};
     }
 });
 
@@ -391,11 +579,206 @@ emojiPicker.addEventListener("click", (event) => {
 });
 
 document.addEventListener("click", (event) => {
-    if (!event.target.closest(".chat-emoji-tools")) {
+    if (!event.target.closest(".chat-emoji-tools, #chat-emoji-picker, #sticker-picker")) {
         emojiPicker.hidden = true;
         emojiBtn.setAttribute("aria-expanded", "false");
+        stickerPicker.hidden = true;
+        stickerBtn.setAttribute("aria-expanded", "false");
     }
 });
+
+const stickerBtn = document.getElementById("stickerBtn");
+const stickerPicker = document.getElementById("sticker-picker");
+const stickerGrid = document.getElementById("sticker-grid");
+const stickerSearch = document.getElementById("sticker-search");
+let selectedStickerPack = "All";
+const stickerPackActions = document.getElementById("sticker-pack-actions");
+
+function updateStickerPackActions() {
+    const hasOwnedSticker = Array.from(stickerGrid.querySelectorAll("[data-sticker-item]"))
+        .some((item) => item.dataset.pack === selectedStickerPack && Number(item.dataset.owner) === CURRENT_USER_ID);
+    stickerPackActions.hidden = !hasOwnedSticker;
+}
+
+function selectStickerPack(name, tab) {
+    selectedStickerPack = name;
+    stickerPicker.querySelectorAll("[data-sticker-pack]").forEach((button) => button.classList.toggle("active", button === tab));
+    updateStickerPackActions();
+    filterStickers();
+}
+
+function ensureStickerPackTab(name) {
+    let tab = Array.from(stickerPicker.querySelectorAll("[data-sticker-pack]"))
+        .find((button) => button.dataset.stickerPack === name);
+    if (tab) return tab;
+    tab = document.createElement("button");
+    tab.type = "button";
+    tab.dataset.stickerPack = name;
+    tab.textContent = name;
+    tab.addEventListener("click", () => selectStickerPack(name, tab));
+    stickerPicker.querySelector(".sticker-tabs").appendChild(tab);
+    return tab;
+}
+
+function filterStickers() {
+    const query = stickerSearch.value.trim().toLocaleLowerCase();
+    stickerGrid.querySelectorAll("[data-sticker-item]").forEach((item) => {
+        const packMatches = selectedStickerPack === "All" ||
+            (selectedStickerPack === "Favorites" && item.dataset.favorite === "true") ||
+            (selectedStickerPack === "Recent" && item.dataset.recent === "true") ||
+            (selectedStickerPack !== "Favorites" && selectedStickerPack !== "Recent" && item.dataset.pack === selectedStickerPack);
+        const text = `${item.dataset.name} ${item.dataset.keywords} ${item.dataset.pack}`.toLocaleLowerCase();
+        item.hidden = !packMatches || !text.includes(query);
+    });
+}
+
+stickerBtn.addEventListener("click", () => {
+    emojiPicker.hidden = true;
+    emojiBtn.setAttribute("aria-expanded", "false");
+    stickerPicker.hidden = !stickerPicker.hidden;
+    stickerBtn.setAttribute("aria-expanded", String(!stickerPicker.hidden));
+    if (!stickerPicker.hidden) stickerSearch.focus();
+});
+document.getElementById("sticker-picker-close").addEventListener("click", () => {
+    stickerPicker.hidden = true;
+    stickerBtn.setAttribute("aria-expanded", "false");
+});
+stickerSearch.addEventListener("input", filterStickers);
+stickerPicker.querySelectorAll("[data-sticker-pack]").forEach((tab) => tab.addEventListener("click", () => {
+    selectStickerPack(tab.dataset.stickerPack, tab);
+}));
+stickerGrid.addEventListener("click", async (event) => {
+    const item = event.target.closest("[data-sticker-item]");
+    if (!item) return;
+    if (event.target.closest("[data-sticker-send]")) {
+        socket.emit("send_sticker", { friend_id: friendId, sticker_id: Number(item.dataset.id) });
+        item.dataset.recent = "true";
+        stickerPicker.hidden = true;
+        stickerBtn.setAttribute("aria-expanded", "false");
+        return;
+    }
+    const response = event.target.closest("[data-sticker-favorite]");
+    if (response) {
+        const result = await fetch(`/stickers/${item.dataset.id}/favorite`, { method: "POST" });
+        const data = await result.json();
+        if (!result.ok || !data.ok) return showActionFeedback("Could not save sticker");
+        item.dataset.favorite = String(data.favorite);
+        response.classList.toggle("active", data.favorite);
+        response.textContent = data.favorite ? "★" : "☆";
+        filterStickers();
+        return;
+    }
+    if (event.target.closest("[data-sticker-report]")) {
+        const result = await fetch(`/stickers/${item.dataset.id}/report`, {
+            method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ reason: "Inappropriate sticker" })
+        });
+        showActionFeedback(result.ok ? "Sticker reported" : "Could not report sticker");
+        return;
+    }
+    if (event.target.closest("[data-sticker-delete]")) {
+        if (!window.confirm("Remove this sticker from your collection?")) return;
+        const result = await fetch(`/stickers/${item.dataset.id}/delete`, { method: "POST" });
+        if (result.ok) item.remove();
+        else showActionFeedback("Could not remove sticker");
+    }
+});
+
+document.getElementById("sticker-pack-share").addEventListener("click", async () => {
+    const response = await fetch("/stickers/packs/share", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pack: selectedStickerPack, friend_id: friendId })
+    });
+    const result = await response.json();
+    showActionFeedback(result.ok ? `Shared ${result.count} stickers` : "Could not share this pack");
+});
+document.getElementById("sticker-pack-delete").addEventListener("click", async () => {
+    if (!window.confirm(`Remove the “${selectedStickerPack}” sticker pack?`)) return;
+    const response = await fetch("/stickers/packs/delete", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pack: selectedStickerPack })
+    });
+    const result = await response.json();
+    if (!response.ok || !result.ok) return showActionFeedback("Could not remove this pack");
+    stickerGrid.querySelectorAll("[data-sticker-item]").forEach((item) => {
+        if (item.dataset.pack === selectedStickerPack && Number(item.dataset.owner) === CURRENT_USER_ID) item.remove();
+    });
+    const tab = Array.from(stickerPicker.querySelectorAll("[data-sticker-pack]"))
+        .find((button) => button.dataset.stickerPack === selectedStickerPack);
+    tab?.remove();
+    selectedStickerPack = "All";
+    const allTab = stickerPicker.querySelector('[data-sticker-pack="All"]');
+    if (allTab) selectStickerPack("All", allTab);
+    showActionFeedback("Sticker pack removed");
+});
+
+const stickerUploadInput = document.getElementById("sticker-upload-file");
+const stickerUploadButton = document.getElementById("sticker-upload-button");
+const stickerCropEditor = document.getElementById("sticker-crop-editor");
+const stickerCropPreview = document.getElementById("sticker-crop-preview");
+const stickerCropZoom = document.getElementById("sticker-crop-zoom");
+let selectedStickerFile = null;
+let stickerCropUrl = null;
+stickerUploadButton.addEventListener("click", () => {
+    if (selectedStickerFile) uploadCustomSticker();
+    else stickerUploadInput.click();
+});
+stickerUploadInput.addEventListener("change", () => {
+    selectedStickerFile = stickerUploadInput.files[0] || null;
+    if (!selectedStickerFile) return;
+    if (stickerCropUrl) URL.revokeObjectURL(stickerCropUrl);
+    stickerCropUrl = URL.createObjectURL(selectedStickerFile);
+    stickerCropPreview.src = stickerCropUrl;
+    stickerCropZoom.value = "1";
+    stickerCropPreview.style.transform = "scale(1)";
+    stickerCropEditor.hidden = selectedStickerFile.type === "image/gif";
+    stickerUploadButton.textContent = "Save sticker";
+});
+stickerCropZoom.addEventListener("input", () => {
+    stickerCropPreview.style.transform = `scale(${stickerCropZoom.value})`;
+});
+
+async function uploadCustomSticker() {
+    const file = selectedStickerFile;
+    if (!file) return;
+    const formData = new FormData();
+    let stickerFile = file;
+    if (file.type !== "image/gif") {
+        try {
+            const image = new Image();
+            image.src = stickerCropUrl;
+            await image.decode();
+            const side = Math.min(image.naturalWidth, image.naturalHeight) / Number(stickerCropZoom.value || 1);
+            const sourceX = (image.naturalWidth - side) / 2;
+            const sourceY = (image.naturalHeight - side) / 2;
+            const canvas = document.createElement("canvas");
+            canvas.width = 512; canvas.height = 512;
+            canvas.getContext("2d").drawImage(image, sourceX, sourceY, side, side, 0, 0, 512, 512);
+            stickerFile = await new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
+            if (!stickerFile) throw new Error("Could not crop image");
+        } catch (error) {
+            return showActionFeedback("Could not prepare this photo as a sticker");
+        }
+    }
+    formData.append("sticker_file", stickerFile, file.type === "image/gif" ? file.name : "sticker.png");
+    formData.append("name", document.getElementById("sticker-upload-name").value || file.name.replace(/\.[^.]+$/, ""));
+    formData.append("keywords", document.getElementById("sticker-upload-keywords").value || file.name);
+    formData.append("pack", document.getElementById("sticker-upload-pack").value || "My stickers");
+    const response = await fetch("/stickers/upload", { method: "POST", headers: { "X-Requested-With": "XMLHttpRequest" }, body: formData });
+    const result = await response.json();
+    stickerUploadInput.value = "";
+    selectedStickerFile = null;
+    stickerUploadButton.textContent = "＋ Create from photo";
+    stickerCropEditor.hidden = true;
+    if (stickerCropUrl) URL.revokeObjectURL(stickerCropUrl);
+    stickerCropUrl = null;
+    if (!response.ok || !result.ok) return showActionFeedback(result.error || "Could not add sticker");
+    const item = addStickerItem({ ...result.sticker, owner_id: CURRENT_USER_ID }, true);
+    const remove = document.createElement("button"); remove.type = "button";
+    remove.dataset.stickerDelete = ""; remove.setAttribute("aria-label", "Remove my sticker"); remove.textContent = "×";
+    item.appendChild(remove);
+    ensureStickerPackTab(result.sticker.pack).click();
+    showActionFeedback("Sticker added to My stickers");
+}
 
 // Land at the newest message on load.
 chatBox.scrollTop = chatBox.scrollHeight;

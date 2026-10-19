@@ -3,13 +3,18 @@
 {% block content %}
 <main class="profile-page">
     <section class="profile-card">
+        {% if back_chat_id and not is_owner %}
+        <a class="profile-back-link" href="/chat/{{ back_chat_id }}" aria-label="Back to chat with {{ user.username }}">← <span>Back to chat</span></a>
+        {% endif %}
         <div class="profile-heading">
             <div class="avatar profile-avatar{% if user.id in online_users %} is-online{% endif %}" id="profile-avatar" data-user-id="{{ user.id }}">
-                {% if user.avatar_url %}<img src="{{ user.avatar_url }}" alt="Profile picture">{% else %}{{ user.username[0].upper() }}{% endif %}
+                {% if can_view_profile_picture(user) %}<img src="/avatar/{{ user.id }}" alt="Profile picture">{% else %}{{ user.username[0].upper() }}{% endif %}
             </div>
             <div>
                 <p class="profile-kicker">{{ 'YOUR CHATTI PROFILE' if is_owner else 'CHATTI PROFILE' }}</p>
                 <h1>{{ user.username }}</h1>
+                {% if is_owner %}<p class="profile-presence" id="profile-presence" {% if not self_is_online %}hidden{% endif %}><span class="profile-presence-dot"></span>You’re active now</p>
+                {% elif user.id in online_users %}<p class="profile-presence"><span class="profile-presence-dot"></span>Active now</p>{% endif %}
             </div>
             {% if is_owner %}<button type="button" class="profile-edit-button" id="edit-profile-button" aria-expanded="false">Edit profile</button>{% endif %}
         </div>
@@ -43,10 +48,13 @@
                       placeholder="A short hello for your friends">{{ user.bio or '' }}</textarea>
             <div class="status-emoji-tools profile-emoji-tools">
                 <button type="button" id="bio-emoji-toggle" aria-expanded="false">😊 Add emoji</button>
-                <div class="status-emoji-picker" id="bio-emoji-picker" hidden aria-label="Choose an emoji">
-                    {% for emoji in ['🥰', '🥹', '😍', '😊', '😘', '😂', '❤️', '💖', '💕', '💗', '🦋', '🌸', '🌷', '🐻', '🐰', '🧸', '🍓', '✨', '🎀', '🌈', '☁️', '🌙', '🌿', '🙏'] %}
-                    <button type="button" class="bio-emoji-option" aria-label="{{ emoji }}">{{ emoji }}</button>
-                    {% endfor %}
+                <div class="status-emoji-picker emoji-searchable-picker" id="bio-emoji-picker" hidden aria-label="Choose an emoji">
+                    <input type="search" class="emoji-search" data-emoji-search placeholder="Search emojis..." aria-label="Search emojis">
+                    <div class="bio-emoji-grid">
+                        {% for emoji in ['🥰', '🥹', '😍', '😊', '😘', '😂', '❤️', '💖', '💕', '💗', '🦋', '🌸', '🌷', '🐻', '🐰', '🧸', '🍓', '✨', '🎀', '🌈', '☁️', '🌙', '🌿', '🙏'] %}
+                        <button type="button" class="bio-emoji-option" data-emoji-option aria-label="{{ emoji }}">{{ emoji }}</button>
+                        {% endfor %}
+                    </div>
                 </div>
             </div>
             <small>Up to 120 characters.</small>

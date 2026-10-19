@@ -10,32 +10,42 @@
 
         <section class="status-section">
             <div class="status-section-heading">
-                <h2>My update</h2>
+                <h2>Your updates and friends</h2>
                 <button type="button" id="add-status-button" class="add-status-button">＋ Add update</button>
             </div>
             <form method="POST" enctype="multipart/form-data" class="status-composer" id="status-composer" hidden>
             <div class="status-compose-head">
                 <div class="avatar status-avatar">
-                    {% if current_user.avatar_url %}<img src="{{ current_user.avatar_url }}" alt="">{% else %}{{ current_user.username[0].upper() }}{% endif %}
+                    {% if can_view_profile_picture(current_user) %}<img src="/avatar/{{ current_user.id }}" alt="">{% else %}{{ current_user.username[0].upper() }}{% endif %}
                 </div>
                 <div><strong>{{ current_user.username }}</strong><small>Share a moment with friends</small></div>
             </div>
             <div class="status-media-picker">
                 <button type="button" id="status-media-button">＋ Add photo, video, or audio</button>
                 <span id="status-media-name">JPG, PNG, GIF, WebP, MP4, WebM, MP3, M4A, OGG, or WAV · up to 25 MB</span>
-                <input type="file" id="status-media-input" name="media_file"
+                <input type="file" id="status-media-input" name="media_files" multiple
                        accept="image/png,image/jpeg,image/gif,image/webp,video/mp4,video/webm,audio/mpeg,audio/mp4,audio/ogg,audio/wav,audio/x-wav,audio/webm" hidden>
             </div>
             <div class="status-compose-preview" id="status-media-preview" hidden></div>
             <label class="status-caption-label" for="status-content">Caption</label>
             <textarea id="status-content" name="content" maxlength="500" rows="3"
                       placeholder="What are you feeling?"></textarea>
+            <div class="status-text-style-controls" aria-label="Text update style">
+                <label>Background <select name="background" id="status-background">
+                    <option value="forest">Midnight blue</option><option value="ocean">Dark navy</option><option value="sunset">Royal blue</option><option value="rose">Dark pink</option><option value="violet">Soft pink</option><option value="gold">Royal blue</option>
+                </select></label>
+                <label>Text <select name="text_style" id="status-text-style"><option value="classic">Classic</option><option value="bold">Bold</option><option value="serif">Serif</option></select></label>
+                <span>Choose a style for text-only updates</span>
+            </div>
             <div class="status-emoji-tools">
                 <button type="button" id="status-emoji-toggle" aria-expanded="false">😊 Add emoji</button>
-                <div class="status-emoji-picker" id="status-emoji-picker" hidden aria-label="Choose an emoji">
-                    {% for emoji in ['🥰', '🥹', '😍', '😊', '😘', '😂', '❤️', '💖', '💕', '💗', '🦋', '🌸', '🌷', '🐻', '🐰', '🧸', '🍓', '✨', '🎀', '🌈', '☁️', '🌙', '🌿', '🙏'] %}
-                    <button type="button" class="status-emoji-option" aria-label="{{ emoji }}">{{ emoji }}</button>
-                    {% endfor %}
+                <div class="status-emoji-picker emoji-searchable-picker" id="status-emoji-picker" hidden aria-label="Choose an emoji">
+                    <input type="search" class="emoji-search" data-emoji-search placeholder="Search emojis..." aria-label="Search emojis">
+                    <div class="status-emoji-grid">
+                        {% for emoji in ['🥰', '🥹', '😍', '😊', '😘', '😂', '❤️', '💖', '💕', '💗', '🦋', '🌸', '🌷', '🐻', '🐰', '🧸', '🍓', '✨', '🎀', '🌈', '☁️', '🌙', '🌿', '🙏'] %}
+                        <button type="button" class="status-emoji-option" data-emoji-option aria-label="{{ emoji }}">{{ emoji }}</button>
+                        {% endfor %}
+                    </div>
                 </div>
             </div>
             <div class="status-composer-footer">
@@ -52,9 +62,10 @@
                 <button type="button" class="updates-story" data-author="You"
                         data-time="{{ status.timestamp.strftime('%b %d, %H:%M') }} UTC"
                         data-content="{{ status.content }}" data-media-url="{{ status.media_url or '' }}"
-                        data-media-type="{{ status.media_type or '' }}" data-delete-url="/status/{{ status.id }}/delete">
+                        data-media-type="{{ status.media_type or '' }}" data-background="{{ status.background or 'forest' }}"
+                        data-text-style="{{ status.text_style or 'classic' }}" data-delete-url="/status/{{ status.id }}/delete">
                     <span class="updates-story-avatar">
-                        {% if author.avatar_url %}<img src="{{ author.avatar_url }}" alt="">{% else %}{{ author.username[0].upper() }}{% endif %}
+                        {% if can_view_profile_picture(author) %}<img src="/avatar/{{ author.id }}" alt="">{% else %}{{ author.username[0].upper() }}{% endif %}
                         <span class="updates-story-ring"></span>
                     </span>
                     <span class="updates-story-name">My update</span>
@@ -65,19 +76,14 @@
                     <span class="updates-story-name">My update</span>
                 </button>
             {% endfor %}
-            </div>
-        </section>
-
-        <section class="status-section">
-            <h2>Recent updates</h2>
-            <div class="updates-circles">
             {% for status, author in friend_statuses %}
                 <button type="button" class="updates-story" data-author="{{ author.username }}"
                         data-time="{{ status.timestamp.strftime('%b %d, %H:%M') }} UTC"
                         data-content="{{ status.content }}" data-media-url="{{ status.media_url or '' }}"
-                        data-media-type="{{ status.media_type or '' }}">
+                        data-media-type="{{ status.media_type or '' }}" data-background="{{ status.background or 'forest' }}"
+                        data-text-style="{{ status.text_style or 'classic' }}">
                     <span class="updates-story-avatar">
-                        {% if author.avatar_url %}<img src="{{ author.avatar_url }}" alt="">{% else %}{{ author.username[0].upper() }}{% endif %}
+                        {% if can_view_profile_picture(author) %}<img src="/avatar/{{ author.id }}" alt="">{% else %}{{ author.username[0].upper() }}{% endif %}
                         <span class="updates-story-ring"></span>
                     </span>
                     <span class="updates-story-name">{{ author.username }}</span>
@@ -114,7 +120,7 @@ const statusComposer = document.getElementById("status-composer");
 const addStatusButton = document.getElementById("add-status-button");
 const statusMediaPreview = document.getElementById("status-media-preview");
 const statusMediaInput = document.getElementById("status-media-input");
-let statusPreviewUrl = null;
+let statusPreviewUrls = [];
 let lastStatusCursorStart = 0;
 let lastStatusCursorEnd = 0;
 
@@ -151,6 +157,7 @@ document.querySelectorAll(".updates-story[data-author]").forEach((story) => {
         document.getElementById("updates-viewer-time").textContent = story.dataset.time;
         viewerContent.textContent = story.dataset.content || "";
         viewerContent.hidden = !story.dataset.content;
+        viewerContent.className = `updates-viewer-content status-color-${story.dataset.background || "forest"} status-text-${story.dataset.textStyle || "classic"}`;
         viewerDeleteForm.hidden = !story.dataset.deleteUrl;
         if (story.dataset.deleteUrl) viewerDeleteForm.action = story.dataset.deleteUrl;
 
@@ -190,8 +197,8 @@ function closeStatusComposer() {
     statusComposer.reset();
     statusComposer.hidden = true;
     addStatusButton.hidden = false;
-    if (statusPreviewUrl) URL.revokeObjectURL(statusPreviewUrl);
-    statusPreviewUrl = null;
+    statusPreviewUrls.forEach((url) => URL.revokeObjectURL(url));
+    statusPreviewUrls = [];
     statusMediaPreview.replaceChildren();
     statusMediaPreview.hidden = true;
     document.getElementById("status-media-name").textContent = "JPG, PNG, GIF, WebP, MP4, WebM, MP3, M4A, OGG, or WAV · up to 25 MB";
@@ -203,26 +210,34 @@ function closeStatusComposer() {
 }
 
 addStatusButton.addEventListener("click", openStatusComposer);
-document.getElementById("empty-add-status-button").addEventListener("click", openStatusComposer);
+document.getElementById("empty-add-status-button")?.addEventListener("click", openStatusComposer);
 document.getElementById("cancel-status-button").addEventListener("click", closeStatusComposer);
 document.getElementById("status-media-button").addEventListener("click", () => statusMediaInput.click());
 statusMediaInput.addEventListener("change", () => {
-    const file = statusMediaInput.files[0];
-    if (!file) return;
+    const files = Array.from(statusMediaInput.files || []);
+    if (!files.length) return;
+    if (files.length > 10) {
+        window.alert("You can add up to 10 photos, videos, or audio files at once.");
+        statusMediaInput.value = "";
+        return;
+    }
 
-    document.getElementById("status-media-name").textContent = file.name;
-    if (statusPreviewUrl) URL.revokeObjectURL(statusPreviewUrl);
-    statusPreviewUrl = URL.createObjectURL(file);
+    document.getElementById("status-media-name").textContent = files.length === 1 ? files[0].name : `${files.length} items selected`;
+    statusPreviewUrls.forEach((url) => URL.revokeObjectURL(url));
+    statusPreviewUrls = [];
     statusMediaPreview.replaceChildren();
-
-    const elementName = file.type.startsWith("video/") ? "video" : file.type.startsWith("audio/") ? "audio" : "img";
-    const preview = document.createElement(elementName);
-    preview.className = "status-compose-preview-media";
-    preview.src = statusPreviewUrl;
-    if (elementName !== "img") preview.controls = true;
-    if (elementName === "video") preview.playsInline = true;
-    if (elementName === "img") preview.alt = "Selected update photo preview";
-    statusMediaPreview.appendChild(preview);
+    files.slice(0, 10).forEach((file) => {
+        const elementName = file.type.startsWith("video/") ? "video" : file.type.startsWith("audio/") ? "audio" : "img";
+        const preview = document.createElement(elementName);
+        preview.className = "status-compose-preview-media";
+        const previewUrl = URL.createObjectURL(file);
+        statusPreviewUrls.push(previewUrl);
+        preview.src = previewUrl;
+        if (elementName !== "img") preview.controls = true;
+        if (elementName === "video") preview.playsInline = true;
+        if (elementName === "img") preview.alt = `Selected update photo preview: ${file.name}`;
+        statusMediaPreview.appendChild(preview);
+    });
     statusMediaPreview.hidden = false;
     statusTextarea.placeholder = "Add a caption...";
     statusTextarea.focus();
