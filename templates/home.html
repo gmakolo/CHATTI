@@ -26,14 +26,8 @@
         </form>
     </section>
 
-    <section class="feed-intro-card">
-        <div class="feed-intro-mark" aria-hidden="true">✳</div>
-        <div><h2>Your people, your space.</h2><p>Chat, share your dreams, learn together, and discover new opportunities.</p></div>
-        <a href="/friends#people-directory">Find your people <span aria-hidden="true">→</span></a>
-    </section>
-
-    <section class="feed-stream" aria-label="Posts">
-        <div class="feed-stream-heading"><h2>Your feed</h2><a href="/friends#people-directory">Explore people</a></div>
+    <section class="feed-stream" id="community-feed" aria-label="Posts">
+        <div class="feed-stream-heading"><h2>Your feed</h2><a href="/explore">Explore CHATTI</a></div>
         {% for item in feed_items %}{% set post = item.post %}{% set author = item.author %}
         <article class="feed-post" id="post-{{ post.id }}">
             <header class="feed-post-header"><a class="feed-author" href="/profile/{{ author.id }}"><span class="feed-avatar">{% if can_view_profile_picture(author) %}<img src="/avatar/{{ author.id }}" alt="">{% else %}{{ author.username[0].upper() }}{% endif %}</span><span><strong>{{ author.username }}</strong><time>{{ post.created_at.strftime('%b %d · %H:%M') }} UTC</time></span></a>{% if author.id == current_user.id %}<form method="POST" action="/posts/{{ post.id }}/delete" onsubmit="return confirm('Delete this post?')"><button class="feed-delete" type="submit" aria-label="Delete post">•••</button></form>{% endif %}</header>
@@ -44,7 +38,7 @@
             <div class="feed-comments">{% for comment, commenter in item.comments %}<p><strong>{{ commenter.username }}</strong> {{ comment.content }}</p>{% endfor %}</div>
             <form class="feed-comment-form" method="POST" action="/posts/{{ post.id }}/comment"><input name="content" maxlength="1000" placeholder="Write a comment…" aria-label="Write a comment" required><button type="submit">Comment</button></form>
         </article>
-        {% else %}<div class="feed-empty"><span>🌱</span><h2>Your feed starts here</h2><p>Share an idea or find your people to get the conversation going.</p><a href="/friends#people-directory">Explore CHATTI</a></div>{% endfor %}
+        {% else %}<div class="feed-empty"><span>🌱</span><h2>Your feed starts here</h2><p>Share an idea, dream, or discussion to start a conversation.</p><a href="#create-post-title">Create your first post</a></div>{% endfor %}
     </section>
 </main>
 {% endblock %}

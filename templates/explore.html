@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block content %}
+<main class="feed-page explore-page">
+    <header class="explore-heading">
+        <span class="home-section-kicker">YOUR CHATTI COMMUNITY</span>
+        <h1>Explore</h1>
+        <p>Find conversations, people, and ideas that bring your community closer.</p>
+    </header>
+    <section class="explore-grid" aria-label="Explore CHATTI">
+        <a class="explore-card explore-card-people" href="/people#discover-panel">
+            <span class="explore-card-icon" aria-hidden="true">♧</span>
+            <span class="explore-card-copy"><strong>Meet people</strong><small>Discover CHATTI members and grow your circle.</small></span>
+            <span class="explore-card-arrow" aria-hidden="true">→</span>
+        </a>
+        <a class="explore-card" href="/#community-feed">
+            <span class="explore-card-icon" aria-hidden="true">✳</span>
+            <span class="explore-card-copy"><strong>Community discussions</strong><small>Catch up on ideas and conversations shared with you.</small></span>
+            <span class="explore-card-arrow" aria-hidden="true">→</span>
+        </a>
+        <a class="explore-card" href="/#create-post-title">
+            <span class="explore-card-icon" aria-hidden="true">＋</span>
+            <span class="explore-card-copy"><strong>Share an idea</strong><small>Start a post about what you’re thinking or learning.</small></span>
+            <span class="explore-card-arrow" aria-hidden="true">→</span>
+        </a>
+        <a class="explore-card explore-card-updates" href="/status">
+            <span class="explore-card-icon" aria-hidden="true">◌</span>
+            <span class="explore-card-copy"><strong>Community updates</strong><small>See the latest status updates from your people.</small></span>
+            <span class="explore-card-arrow" aria-hidden="true">→</span>
+        </a>
+    </section>
+</main>
+{% endblock %}

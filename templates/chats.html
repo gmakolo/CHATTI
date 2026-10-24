@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% block content %}
+<main class="feed-page chats-page">
+    <header class="chats-page-heading">
+        <div><span class="home-section-kicker">YOUR CONVERSATIONS</span><h1>Chats</h1><p>Pick up where you left off with your people.</p></div>
+        <label class="home-chat-search"><span aria-hidden="true">⌕</span><input id="chats-search" type="search" placeholder="Search chats or messages" autocomplete="off" aria-label="Search chats or messages"></label>
+    </header>
+    <section class="home-chat-section" aria-label="Your conversations">
+        <div class="home-chat-filters" role="tablist" aria-label="Filter conversations">
+            <button type="button" role="tab" data-chat-filter="all" aria-selected="true">All Chats</button>
+            <button type="button" role="tab" data-chat-filter="unread" aria-selected="false">Unread</button>
+            <button type="button" role="tab" data-chat-filter="groups" aria-selected="false">Groups</button>
+            <button type="button" role="tab" data-chat-filter="archived" aria-selected="false">Archived</button>
+        </div>
+        <div class="home-chat-list" id="chats-list">
+            {% for item in conversations %}{% set person = item.friend %}
+            <article class="home-chat-card{% if item.unread_count %} is-unread{% endif %}" data-chat-row data-peer-id="{{ person.id }}" data-name="{{ person.username|lower }}" data-preview="{{ item.preview|striptags|lower }}" data-unread="{{ item.unread_count }}" data-archived="{{ 'true' if item.archived else 'false' }}">
+                <a class="home-chat-link" href="/chat/{{ person.id }}">
+                    <span class="home-chat-avatar">{% if can_view_profile_picture(person) %}<img src="/avatar/{{ person.id }}" alt="">{% else %}{{ person.username[0].upper() }}{% endif %}{% if person.id in online_users %}<span class="home-online-dot" aria-label="Online"></span>{% endif %}</span>
+                    <span class="home-chat-copy"><span class="home-chat-name-row"><strong>{{ person.username }}</strong>{% if item.archived %}<span class="home-chat-archived-label">Archived</span>{% endif %}<time>{{ item.time_label }}</time></span><span class="home-chat-preview-row"><span>{{ item.preview }}</span>{% if item.unread_count %}<span class="home-chat-unread" aria-label="{{ item.unread_count }} unread messages">{{ item.unread_count if item.unread_count < 100 else '99+' }}</span>{% endif %}</span></span>
+                </a>
+                <form class="home-chat-archive-form" method="POST" action="/chat/{{ person.id }}/archive"><input type="hidden" name="action" value="{{ 'unarchive' if item.archived else 'archive' }}"><button type="submit" aria-label="{{ 'Unarchive' if item.archived else 'Archive' }} {{ person.username }} chat">{{ 'Restore' if item.archived else 'Archive' }}</button></form>
+            </article>
+            {% endfor %}
+            <div class="home-chat-empty" id="chats-empty" {% if conversations %}hidden{% endif %}><span aria-hidden="true">💬</span><strong>No conversations yet</strong><p>Your conversations will appear here when you start chatting.</p></div>
+            <div class="home-chat-empty" id="chats-filter-empty" hidden><span aria-hidden="true">⌕</span><strong>No matching conversations</strong><p>Try another search or choose a different filter.</p></div>
+            <div class="home-chat-empty" id="chats-groups-empty" hidden><span aria-hidden="true">👥</span><strong>Group chats are coming soon</strong><p>Group conversations aren’t available in CHATTI yet.</p></div>
+        </div>
+    </section>
+</main>
+{% endblock %}
+{% block scripts %}
+<script>
+(() => {
+    const search = document.getElementById("chats-search");
+    const rows = [...document.querySelectorAll("[data-chat-row]")];
+    const tabs = [...document.querySelectorAll("[data-chat-filter]")];
+    const none = document.getElementById("chats-empty");
+    const noMatch = document.getElementById("chats-filter-empty");
+    const groupsEmpty = document.getElementById("chats-groups-empty");
+    const requestedFilter = new URLSearchParams(window.location.search).get("filter");
+    let filter = ["all", "unread", "groups", "archived"].includes(requestedFilter) ? requestedFilter : "all";
+    let messageMatches = new Set();
+    let searchTimer;
+    let searchRequest = 0;
+    const render = () => {
+        const query = search.value.trim().toLowerCase();
+        let shown = 0;
+        rows.forEach((row) => {
+            const archived = row.dataset.archived === "true";
+            const unread = Number(row.dataset.unread) > 0;
+            const matchesFilter = filter === "all" ? true : filter === "unread" ? unread : filter === "archived" ? archived : false;
+            const matchesSearch = !query || row.dataset.name.includes(query) || row.dataset.preview.includes(query) || messageMatches.has(Number(row.dataset.peerId));
+            row.hidden = !(matchesFilter && matchesSearch);
+            if (!row.hidden) shown++;
+        });
+        tabs.forEach((tab) => tab.setAttribute("aria-selected", String(tab.dataset.chatFilter === filter)));
+        none.hidden = rows.length > 0 || filter === "groups" || query.length > 0;
+        groupsEmpty.hidden = filter !== "groups";
+        noMatch.hidden = filter === "groups" || shown > 0 || (rows.length === 0 && filter === "all" && !query);
+    };
+    tabs.forEach((tab) => tab.addEventListener("click", () => { filter = tab.dataset.chatFilter; render(); }));
+    search.addEventListener("input", () => {
+        messageMatches = new Set();
+        render();
+        window.clearTimeout(searchTimer);
+        const query = search.value.trim();
+        const requestId = ++searchRequest;
+        if (query.length < 2) return;
+        searchTimer = window.setTimeout(async () => {
+            try {
+                const response = await fetch(`/conversations/search?q=${encodeURIComponent(query)}`, {headers: {"Accept": "application/json"}});
+                if (!response.ok || requestId !== searchRequest) return;
+                const result = await response.json();
+                messageMatches = new Set(result.peer_ids || []);
+                render();
+            } catch (_) { /* Name and latest-message search remains available. */ }
+        }, 220);
+    });
+    render();
+})();
+</script>
+{% endblock %}

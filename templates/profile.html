@@ -12,7 +12,8 @@
             </div>
             <div>
                 <p class="profile-kicker">{{ 'YOUR CHATTI PROFILE' if is_owner else 'CHATTI PROFILE' }}</p>
-                <h1>{{ user.username }}</h1>
+                <h1>{{ user.full_name or user.username }}</h1>
+                {% if user.full_name %}<p class="profile-username">@{{ user.username }}</p>{% endif %}
                 {% if is_owner %}<p class="profile-presence" id="profile-presence" {% if not self_is_online %}hidden{% endif %}><span class="profile-presence-dot"></span>You’re active now</p>
                 {% elif user.id in online_users %}<p class="profile-presence"><span class="profile-presence-dot"></span>Active now</p>{% endif %}
             </div>
@@ -20,10 +21,13 @@
         </div>
 
         <div class="profile-about" id="profile-about">
-            <span>About</span>
+            <span>About me</span>
             <p>{{ user.bio or 'Add a little about yourself.' }}</p>
+            {% if user.birthday %}<span>Birthday</span><p>{{ user.birthday.strftime('%B %d, %Y') }}</p>{% endif %}
+            {% if user.gender %}<span>Gender</span><p>{{ user.gender }}</p>{% endif %}
+            {% if user.location %}<span>Location</span><p>{{ user.location }}</p>{% endif %}
             {% if is_owner %}
-            <span class="profile-email-label">Recovery email</span>
+            <span class="profile-email-label">Email address</span>
             <p>{{ user.email or 'Add an email address so you can recover your password.' }}</p>
             {% endif %}
         </div>
@@ -38,10 +42,30 @@
             </div>
             {% if user.avatar_url %}<label class="remove-picture-option"><input type="checkbox" name="remove_picture"> Remove current picture</label>{% endif %}
 
-            <label for="profile-email">Recovery email</label>
+            <label for="profile-full-name">Full name</label>
+            <input id="profile-full-name" type="text" name="full_name" maxlength="100"
+                   autocomplete="name" value="{{ user.full_name or '' }}" placeholder="Your full name">
+
+            <label for="profile-username">Username</label>
+            <input id="profile-username" type="text" name="username" maxlength="50" required
+                   autocomplete="username" value="{{ user.username }}">
+
+            <label for="profile-email">Email address</label>
             <input id="profile-email" type="email" name="email" maxlength="254"
                    autocomplete="email" value="{{ user.email or '' }}" placeholder="you@example.com">
             <small>Used to send password recovery links.</small>
+
+            <label for="profile-birthday">Birthday</label>
+            <input id="profile-birthday" type="date" name="birthday" max="{{ today_iso }}"
+                   value="{{ user.birthday.isoformat() if user.birthday else '' }}">
+
+            <label for="profile-gender">Gender</label>
+            <input id="profile-gender" type="text" name="gender" maxlength="40"
+                   value="{{ user.gender or '' }}" placeholder="Add your gender">
+
+            <label for="profile-location">Location <small>(optional)</small></label>
+            <input id="profile-location" type="text" name="location" maxlength="120"
+                   autocomplete="address-level2" value="{{ user.location or '' }}" placeholder="City or region">
 
             <label for="bio">About</label>
             <textarea id="bio" name="bio" maxlength="120" rows="3"

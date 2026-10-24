@@ -6,10 +6,21 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600&display=swap" rel="stylesheet">
 
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=midnight-blue-1">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=electric-violet-1">
 </head>
 
-<body class="{% if session.get('user_id') %}app-authenticated{% endif %}" data-notifications-enabled="{{ 'true' if current_notifications_enabled() else 'false' }}">
+<body class="{% if session.get('user_id') %}app-authenticated{% endif %}{% if current_appearance_mode() == 'dark' %} dark-mode{% endif %}" data-appearance-mode="{{ current_appearance_mode() }}" data-notifications-enabled="{{ 'true' if current_notifications_enabled() else 'false' }}">
+    <script>
+    (() => {
+        try {
+            const serverMode = document.body.dataset.appearanceMode;
+            const savedMode = document.body.classList.contains("app-authenticated")
+                ? serverMode : localStorage.getItem("chatti-appearance");
+            document.body.classList.toggle("dark-mode", savedMode === "dark");
+            document.documentElement.classList.toggle("dark-mode", savedMode === "dark");
+        } catch (_) { /* The server-rendered preference remains available when storage is disabled. */ }
+    })();
+    </script>
 
     <!-- TOP NAVBAR -->
     <nav class="navbar">
@@ -22,8 +33,9 @@
             {% if session.get("user_id") %}
                 <a class="{{ 'active' if request.path == '/' else '' }}" href="/"><span>⌂</span>Home</a>
                 <a class="{{ 'active' if request.path == '/friends' or request.path.startswith('/chat/') else '' }}" href="/friends"><span>◉</span>Chats</a>
+                <a class="{{ 'active' if request.path == '/people' else '' }}" href="/people"><span>♧</span>People</a>
+                <a class="{{ 'active' if request.path == '/explore' else '' }}" href="/explore"><span>⌕</span>Explore</a>
                 <a class="{{ 'active' if request.path.startswith('/status') else '' }}" href="/status"><span>◌</span>Updates</a>
-                <a href="/friends#people-directory"><span>⌕</span>Discover</a>
                 <a class="{{ 'active' if request.path.startswith('/profile') else '' }}" href="/profile"><span>○</span>Profile</a>
                 <a class="{{ 'active' if request.path.startswith('/settings') else '' }}" href="/settings"><span>⚙</span>Settings</a>
                 <div class="nav-secondary-links">
@@ -233,8 +245,20 @@
     (() => {
         const body = document.body;
         const buttons = document.querySelectorAll("[data-appearance-toggle]");
-        const savedMode = localStorage.getItem("chatti-appearance");
-        if (savedMode === "dark") body.classList.add("dark-mode");
+        const savedMode = body.dataset.appearanceMode || localStorage.getItem("chatti-appearance") || "light";
+        body.classList.toggle("dark-mode", savedMode === "dark");
+        document.documentElement.classList.toggle("dark-mode", savedMode === "dark");
+        const persistMode = async (mode) => {
+            body.dataset.appearanceMode = mode;
+            try { localStorage.setItem("chatti-appearance", mode); } catch (_) { /* DB preference remains authoritative for signed-in users. */ }
+            if (!CURRENT_USER_ID) return;
+            try {
+                await fetch("/appearance", {
+                    method: "POST", headers: {"Content-Type": "application/json", "Accept": "application/json"},
+                    body: JSON.stringify({mode})
+                });
+            } catch (_) { /* Keep the visual toggle immediate if persistence is temporarily unavailable. */ }
+        };
         const updateLabel = () => {
             const dark = body.classList.contains("dark-mode");
             buttons.forEach((button) => {
@@ -245,7 +269,8 @@
         updateLabel();
         buttons.forEach((button) => button.addEventListener("click", () => {
             body.classList.toggle("dark-mode");
-            localStorage.setItem("chatti-appearance", body.classList.contains("dark-mode") ? "dark" : "light");
+            document.documentElement.classList.toggle("dark-mode", body.classList.contains("dark-mode"));
+            persistMode(body.classList.contains("dark-mode") ? "dark" : "light");
             updateLabel();
         }));
         const moreButton = document.getElementById("mobile-more-toggle");

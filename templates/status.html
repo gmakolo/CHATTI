@@ -57,57 +57,70 @@
             </div>
             </form>
 
-            <div class="updates-circles">
-            {% for status, author in own_statuses %}
-                <button type="button" class="updates-story" data-author="You"
-                        data-time="{{ status.timestamp.strftime('%b %d, %H:%M') }} UTC"
-                        data-content="{{ status.content }}" data-media-url="{{ status.media_url or '' }}"
-                        data-media-type="{{ status.media_type or '' }}" data-background="{{ status.background or 'forest' }}"
-                        data-text-style="{{ status.text_style or 'classic' }}" data-delete-url="/status/{{ status.id }}/delete">
+            <div class="updates-circles" aria-label="Recent updates">
+                {% set my_story = namespace(found=false, unseen=false, start=0) %}
+                {% for author in story_authors %}
+                    {% if author.user_id == current_user_id %}
+                        {% set my_story.found = true %}{% set my_story.unseen = author.unseen %}{% set my_story.start = author.start_index %}
+                    {% endif %}
+                {% endfor %}
+                <div class="updates-story-slot">
+                    <button type="button" class="updates-story updates-story-own{% if my_story.unseen %} has-unseen{% endif %}"
+                            {% if my_story.found %}data-story-start="{{ my_story.start }}"{% else %}id="empty-add-status-button"{% endif %}>
+                        <span class="updates-story-avatar{% if not my_story.found %} updates-story-empty{% endif %}">
+                            {% if can_view_profile_picture(current_user) %}<img src="/avatar/{{ current_user.id }}" alt="">{% else %}{{ current_user.username[0].upper() }}{% endif %}
+                            <span class="updates-story-ring"></span>
+                        </span>
+                        <span class="updates-story-name">My update</span>
+                    </button>
+                    <button type="button" class="updates-story-add" id="my-update-add-button" aria-label="Add update">＋</button>
+                </div>
+                {% for author in story_authors if author.user_id != current_user_id %}
+                <button type="button" class="updates-story{% if author.unseen %} has-unseen{% else %} is-seen{% endif %}"
+                        data-story-start="{{ author.start_index }}" aria-label="View {{ author.username }}'s updates">
                     <span class="updates-story-avatar">
-                        {% if can_view_profile_picture(author) %}<img src="/avatar/{{ author.id }}" alt="">{% else %}{{ author.username[0].upper() }}{% endif %}
-                        <span class="updates-story-ring"></span>
-                    </span>
-                    <span class="updates-story-name">My update</span>
-                </button>
-            {% else %}
-                <button type="button" class="updates-story" id="empty-add-status-button">
-                    <span class="updates-story-avatar updates-story-empty">{{ current_user.username[0].upper() }}<span class="updates-story-plus">＋</span></span>
-                    <span class="updates-story-name">My update</span>
-                </button>
-            {% endfor %}
-            {% for status, author in friend_statuses %}
-                <button type="button" class="updates-story" data-author="{{ author.username }}"
-                        data-time="{{ status.timestamp.strftime('%b %d, %H:%M') }} UTC"
-                        data-content="{{ status.content }}" data-media-url="{{ status.media_url or '' }}"
-                        data-media-type="{{ status.media_type or '' }}" data-background="{{ status.background or 'forest' }}"
-                        data-text-style="{{ status.text_style or 'classic' }}">
-                    <span class="updates-story-avatar">
-                        {% if can_view_profile_picture(author) %}<img src="/avatar/{{ author.id }}" alt="">{% else %}{{ author.username[0].upper() }}{% endif %}
+                        {% if author.avatar_url %}<img src="{{ author.avatar_url }}" alt="">{% else %}{{ author.initial }}{% endif %}
                         <span class="updates-story-ring"></span>
                     </span>
                     <span class="updates-story-name">{{ author.username }}</span>
                 </button>
-            {% else %}
-                <p class="status-no-updates">No recent updates from friends.</p>
-            {% endfor %}
+                {% endfor %}
+                {% if not friend_statuses %}<p class="status-no-updates">No recent updates from friends.</p>{% endif %}
             </div>
         </section>
     </section>
 </main>
 
+<script type="application/json" id="updates-story-data">{{ viewer_stories|tojson }}</script>
 <div class="updates-viewer" id="updates-viewer" role="dialog" aria-modal="true" aria-label="Update" hidden>
+    <button type="button" class="updates-viewer-nav previous" id="updates-viewer-previous" aria-label="Previous update">‹</button>
     <div class="updates-viewer-card">
+        <div class="updates-viewer-progress" id="updates-viewer-progress" aria-hidden="true"></div>
         <div class="updates-viewer-header">
-            <div><strong id="updates-viewer-author"></strong><time id="updates-viewer-time"></time></div>
+            <div class="updates-viewer-author">
+                <span class="updates-viewer-avatar" id="updates-viewer-avatar"></span>
+                <span><strong id="updates-viewer-author"></strong><time id="updates-viewer-time"></time><small id="updates-viewer-expiry"></small></span>
+            </div>
             <button type="button" id="updates-viewer-close" aria-label="Close update">×</button>
         </div>
-        <div id="updates-viewer-media" class="updates-viewer-media"></div>
-        <p id="updates-viewer-content" class="updates-viewer-content"></p>
-        <form method="POST" id="updates-viewer-delete-form" hidden>
-            <button type="submit">Delete my update</button>
-        </form>
+        <div class="updates-viewer-stage" id="updates-viewer-stage">
+            <div id="updates-viewer-media" class="updates-viewer-media"></div>
+            <p id="updates-viewer-content" class="updates-viewer-content"></p>
+        </div>
+        <div class="updates-viewer-interactions" id="updates-viewer-interactions">
+            <div class="updates-reactions" aria-label="React to update">
+                {% for reaction in ['❤️', '😂', '😮', '😢', '👏', '🔥'] %}<button type="button" class="updates-reaction" data-reaction="{{ reaction }}" aria-label="React {{ reaction }}">{{ reaction }}</button>{% endfor %}
+            </div>
+            <div class="updates-reaction-counts" id="updates-reaction-counts" aria-live="polite"></div>
+            <form class="updates-reply-form" id="updates-reply-form">
+                <label class="sr-only" for="updates-reply-input">Reply privately</label>
+                <input id="updates-reply-input" maxlength="2000" placeholder="Reply privately..." autocomplete="off">
+                <button type="submit">Send</button>
+            </form>
+            <form method="POST" id="updates-viewer-delete-form" hidden><button type="submit">Delete my update</button></form>
+        </div>
     </div>
+    <button type="button" class="updates-viewer-nav next" id="updates-viewer-next" aria-label="Next update">›</button>
 </div>
 {% endblock %}
 
@@ -142,50 +155,148 @@ const updatesViewer = document.getElementById("updates-viewer");
 const viewerMedia = document.getElementById("updates-viewer-media");
 const viewerContent = document.getElementById("updates-viewer-content");
 const viewerDeleteForm = document.getElementById("updates-viewer-delete-form");
+const viewerStories = JSON.parse(document.getElementById("updates-story-data").textContent || "[]");
+const viewerStage = document.getElementById("updates-viewer-stage");
+const viewerExpiry = document.getElementById("updates-viewer-expiry");
+const viewerAvatar = document.getElementById("updates-viewer-avatar");
+const viewerReplyForm = document.getElementById("updates-reply-form");
+const viewerReplyInput = document.getElementById("updates-reply-input");
+const viewerReactionCounts = document.getElementById("updates-reaction-counts");
+let activeStoryIndex = -1;
 let lastFocusedStory = null;
 
 function closeUpdatesViewer() {
     updatesViewer.hidden = true;
     viewerMedia.replaceChildren();
+    viewerStage.className = "updates-viewer-stage";
+    viewerReplyInput.value = "";
+    activeStoryIndex = -1;
     if (lastFocusedStory) lastFocusedStory.focus();
 }
 
-document.querySelectorAll(".updates-story[data-author]").forEach((story) => {
+function renderReactionCounts(counts, mine) {
+    viewerReactionCounts.replaceChildren();
+    document.querySelectorAll(".updates-reaction").forEach((button) => {
+        button.classList.toggle("active", button.dataset.reaction === mine);
+        button.disabled = viewerStories[activeStoryIndex]?.user_id === Number(CURRENT_USER_ID);
+    });
+    Object.entries(counts || {}).forEach(([reaction, count]) => {
+        const item = document.createElement("span");
+        item.textContent = `${reaction} ${count}`;
+        viewerReactionCounts.appendChild(item);
+    });
+}
+
+function updateExpiry(story) {
+    const milliseconds = new Date(story.expires_at).getTime() - Date.now();
+    if (milliseconds <= 0) {
+        viewerExpiry.textContent = "Expired";
+        return;
+    }
+    const minutes = Math.ceil(milliseconds / 60000);
+    const hours = Math.floor(minutes / 60);
+    const leftMinutes = minutes % 60;
+    viewerExpiry.textContent = hours ? `Expires in ${hours}h ${leftMinutes}m` : `Expires in ${leftMinutes}m`;
+}
+
+async function renderStory(index) {
+    if (index < 0 || index >= viewerStories.length) return;
+    activeStoryIndex = index;
+    const story = viewerStories[index];
+    document.getElementById("updates-viewer-author").textContent = story.author;
+    document.getElementById("updates-viewer-time").textContent = story.time_label;
+    viewerAvatar.replaceChildren();
+    if (story.avatar_url) {
+        const image = document.createElement("img"); image.src = story.avatar_url; image.alt = ""; viewerAvatar.appendChild(image);
+    } else viewerAvatar.textContent = story.initial;
+    viewerContent.textContent = story.content || "";
+    viewerContent.hidden = !story.content;
+    viewerContent.className = `updates-viewer-content status-color-${story.background} status-text-${story.text_style}`;
+    viewerStage.className = `updates-viewer-stage${story.media_url ? " has-media" : ` ${viewerContent.className}`}`;
+    viewerDeleteForm.hidden = !story.delete_url;
+    if (story.delete_url) viewerDeleteForm.action = story.delete_url;
+    viewerReplyForm.hidden = story.user_id === Number(CURRENT_USER_ID);
+    viewerMedia.replaceChildren();
+    if (story.media_url) {
+        const kind = story.media_type;
+        const media = document.createElement(kind === "image" ? "img" : kind === "video" ? "video" : "audio");
+        media.className = "updates-viewer-media-item";
+        media.src = story.media_url;
+        if (kind === "image") media.alt = "Shared update photo";
+        else { media.controls = true; if (kind === "video") media.playsInline = true; }
+        viewerMedia.appendChild(media);
+    }
+    document.getElementById("updates-viewer-previous").disabled = index <= 0;
+    document.getElementById("updates-viewer-next").disabled = index >= viewerStories.length - 1;
+    updateExpiry(story);
+    renderReactionCounts(story.reactions, story.my_reaction);
+    if (story.user_id !== Number(CURRENT_USER_ID)) {
+        fetch(`/status/${story.id}/view`, {method: "POST", headers: {"X-Requested-With": "fetch"}}).then((response) => {
+            if (response.ok) {
+                story.seen = true;
+                document.querySelectorAll(`.updates-story[data-story-start]`).forEach((button) => {
+                    const authorStory = viewerStories[Number(button.dataset.storyStart)];
+                    if (authorStory && authorStory.user_id === story.user_id) button.classList.add("is-seen");
+                });
+            }
+        }).catch(() => {});
+    }
+}
+
+document.querySelectorAll(".updates-story[data-story-start]").forEach((story) => {
     story.addEventListener("click", () => {
         lastFocusedStory = story;
-        document.getElementById("updates-viewer-author").textContent = story.dataset.author;
-        document.getElementById("updates-viewer-time").textContent = story.dataset.time;
-        viewerContent.textContent = story.dataset.content || "";
-        viewerContent.hidden = !story.dataset.content;
-        viewerContent.className = `updates-viewer-content status-color-${story.dataset.background || "forest"} status-text-${story.dataset.textStyle || "classic"}`;
-        viewerDeleteForm.hidden = !story.dataset.deleteUrl;
-        if (story.dataset.deleteUrl) viewerDeleteForm.action = story.dataset.deleteUrl;
-
-        viewerMedia.replaceChildren();
-        if (story.dataset.mediaUrl) {
-            const kind = story.dataset.mediaType;
-            const media = document.createElement(kind === "image" ? "img" : kind === "video" ? "video" : "audio");
-            media.className = "updates-viewer-media-item";
-            media.src = story.dataset.mediaUrl;
-            if (kind === "image") media.alt = "Shared update photo";
-            else {
-                media.controls = true;
-                if (kind === "video") media.playsInline = true;
-            }
-            viewerMedia.appendChild(media);
-        }
         updatesViewer.hidden = false;
         document.getElementById("updates-viewer-close").focus();
+        renderStory(Number(story.dataset.storyStart));
     });
 });
 
 document.getElementById("updates-viewer-close").addEventListener("click", closeUpdatesViewer);
+document.getElementById("updates-viewer-previous").addEventListener("click", () => renderStory(activeStoryIndex - 1));
+document.getElementById("updates-viewer-next").addEventListener("click", () => renderStory(activeStoryIndex + 1));
 updatesViewer.addEventListener("click", (event) => {
     if (event.target === updatesViewer) closeUpdatesViewer();
 });
 document.addEventListener("keydown", (event) => {
     if (event.key === "Escape" && !updatesViewer.hidden) closeUpdatesViewer();
+    if (!updatesViewer.hidden && event.key === "ArrowLeft") renderStory(activeStoryIndex - 1);
+    if (!updatesViewer.hidden && event.key === "ArrowRight") renderStory(activeStoryIndex + 1);
 });
+
+document.querySelectorAll(".updates-reaction").forEach((button) => button.addEventListener("click", async () => {
+    const story = viewerStories[activeStoryIndex]; if (!story || story.user_id === Number(CURRENT_USER_ID)) return;
+    const response = await fetch(`/status/${story.id}/react`, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({reaction: button.dataset.reaction})});
+    const result = await response.json();
+    if (!response.ok) { viewerReactionCounts.textContent = result.error || "Reaction could not be saved"; return; }
+    story.my_reaction = result.my_reaction; story.reactions = result.counts;
+    renderReactionCounts(story.reactions, story.my_reaction);
+}));
+
+viewerReplyForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const story = viewerStories[activeStoryIndex]; const content = viewerReplyInput.value.trim();
+    if (!story || !content) return;
+    const submit = viewerReplyForm.querySelector("button[type=submit]"); submit.disabled = true;
+    try {
+        const response = await fetch(`/status/${story.id}/reply`, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({content})});
+        const result = await response.json();
+        if (!response.ok) { viewerReplyInput.setCustomValidity(result.error || "Reply could not be sent"); viewerReplyInput.reportValidity(); viewerReplyInput.setCustomValidity(""); return; }
+        viewerReplyInput.value = ""; viewerReplyInput.placeholder = "Reply sent privately";
+        setTimeout(() => { viewerReplyInput.placeholder = "Reply privately..."; }, 1800);
+    } catch (_) { viewerReplyInput.setCustomValidity("Reply could not be sent. Try again."); viewerReplyInput.reportValidity(); viewerReplyInput.setCustomValidity(""); }
+    finally { submit.disabled = false; }
+});
+
+let swipeStartX = null;
+viewerStage.addEventListener("touchstart", (event) => { swipeStartX = event.changedTouches[0].clientX; }, {passive: true});
+viewerStage.addEventListener("touchend", (event) => {
+    if (swipeStartX === null) return;
+    const delta = event.changedTouches[0].clientX - swipeStartX;
+    if (Math.abs(delta) > 55) renderStory(activeStoryIndex + (delta < 0 ? 1 : -1));
+    swipeStartX = null;
+}, {passive: true});
+setInterval(() => { if (!updatesViewer.hidden && activeStoryIndex >= 0) updateExpiry(viewerStories[activeStoryIndex]); }, 60000);
 
 function openStatusComposer() {
     statusComposer.hidden = false;
@@ -211,6 +322,7 @@ function closeStatusComposer() {
 
 addStatusButton.addEventListener("click", openStatusComposer);
 document.getElementById("empty-add-status-button")?.addEventListener("click", openStatusComposer);
+document.getElementById("my-update-add-button")?.addEventListener("click", openStatusComposer);
 document.getElementById("cancel-status-button").addEventListener("click", closeStatusComposer);
 document.getElementById("status-media-button").addEventListener("click", () => statusMediaInput.click());
 statusMediaInput.addEventListener("change", () => {

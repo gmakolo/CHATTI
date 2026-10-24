@@ -1,126 +1,77 @@
 {% extends "base.html" %}
-
 {% block content %}
-<main class="chat-layout conversations-layout">
-    <aside class="sidebar conversation-sidebar" aria-label="Conversations">
-        <div class="conversation-heading">
-            <div><p>YOUR PEOPLE</p><h1>Chats</h1></div>
-            <span class="conversation-count">{{ conversations|length }}</span>
+<main class="feed-page people-page-shell">
+    <header class="people-page-heading">
+        <div><p>YOUR CHATTI COMMUNITY</p><h1>People</h1></div>
+        <span>Your space to connect, keep up with friends, and discover someone new.</span>
+    </header>
+
+    {% if incoming_requests %}
+    <section class="friend-added-notice people-requests" aria-label="Friend requests">
+        <strong>Friend requests <span>{{ incoming_requests|length }}</span></strong>
+        {% for item in incoming_requests %}
+        <div class="friend-request-row">
+            <span>{{ item.person.username }} wants to be your friend.</span>
+            <div class="friend-request-actions">
+                <form method="POST" action="/friend_request/{{ item.id }}/accept"><input type="hidden" name="return_to" value="/people"><button type="submit">Accept</button></form>
+                <form method="POST" action="/friend_request/{{ item.id }}/decline"><input type="hidden" name="return_to" value="/people"><button type="submit">Decline</button></form>
+            </div>
         </div>
-        <label class="conversation-search-wrap" for="conversation-search">
-            <span aria-hidden="true">⌕</span>
-            <input type="search" id="conversation-search" placeholder="Search conversations..." autocomplete="off">
-        </label>
-        <div class="conversation-list" id="conversation-list">
-            {% for item in conversations %}{% set friend = item.friend %}
-            <a href="/chat/{{ friend.id }}" class="conversation-row" data-conversation-search="{{ (friend.username ~ ' ' ~ item.preview)|lower }}">
-                <div class="avatar conversation-avatar{% if friend.id in online_users %} is-online{% endif %}" data-user-id="{{ friend.id }}">
-                    {% if can_view_profile_picture(friend) %}<img src="/avatar/{{ friend.id }}" alt="">{% else %}{{ friend.username[0].upper() }}{% endif %}
-                </div>
-                <div class="conversation-copy">
-                    <div class="conversation-name-line"><strong>{{ friend.username }}</strong><time>{{ item.time_label }}</time></div>
-                    <div class="conversation-preview-line">
-                        <span class="conversation-preview">{{ item.preview }}</span>
-                        {% if item.unread_count %}<span class="conversation-unread" aria-label="{{ item.unread_count }} unread messages">{{ item.unread_count if item.unread_count < 100 else '99+' }}</span>{% endif %}
-                    </div>
-                </div>
-            </a>
-            {% else %}
-            <div class="conversation-empty"><span>☘</span><strong>Your chats will appear here</strong><p>Add a friend or start a conversation to get going.</p></div>
-            {% endfor %}
-            <p class="conversation-search-empty" id="conversation-search-empty" hidden>No conversations match that search.</p>
+        {% endfor %}
+    </section>
+    {% endif %}
+
+    <section class="account-directory people-directory-page" id="people-directory">
+        <div class="account-directory-heading people-directory-heading">
+            <div><h2>Find People</h2><p>Manage your connections or meet new people in the CHATTI community.</p></div>
+            <input type="search" id="account-search" placeholder="Search people..." aria-label="Search people" autocomplete="off">
         </div>
-        <a class="conversation-discover-link" href="#people-directory" data-open-people-tab="discover">＋ Find people</a>
-    </aside>
-
-    <section class="main-panel friends-main-panel">
-        <div class="container friends-main-container">
-            <header class="people-page-heading">
-                <div><p>YOUR CHATTI COMMUNITY</p><h2>People</h2></div>
-                <span>Your space to connect.</span>
-            </header>
-
-            {% if incoming_requests %}
-            <section class="friend-added-notice" aria-label="Friend requests">
-                <strong>Friend requests <span>{{ incoming_requests|length }}</span></strong>
-                {% for item in incoming_requests %}
-                <div class="friend-request-row">
-                    <span>{{ item.person.username }} wants to be your friend.</span>
-                    <div class="friend-request-actions">
-                        <form method="POST" action="/friend_request/{{ item.id }}/accept"><button type="submit">Accept</button></form>
-                        <form method="POST" action="/friend_request/{{ item.id }}/decline"><button type="submit">Decline</button></form>
-                    </div>
-                </div>
-                {% endfor %}
-            </section>
-            {% endif %}
-
-            <section class="account-directory" id="people-directory">
-                <div class="account-directory-heading people-directory-heading">
-                    <div><h3>Find people</h3><p>Keep up with friends or discover someone new.</p></div>
-                    <input type="search" id="account-search" placeholder="Search people..." aria-label="Search people" autocomplete="off">
-                </div>
-                <div class="people-tabs" role="tablist" aria-label="People">
-                    <button type="button" class="people-tab active" id="friends-tab" role="tab" aria-selected="true" aria-controls="friends-panel" data-people-tab="friends">Friends <span>{{ friends|length }}</span></button>
-                    <button type="button" class="people-tab" id="discover-tab" role="tab" aria-selected="false" aria-controls="discover-panel" data-people-tab="discover">Discover <span>{{ discover_accounts|length }}</span></button>
-                </div>
-
-                <div class="account-directory-list people-panel" id="friends-panel" role="tabpanel" aria-labelledby="friends-tab" data-people-panel="friends">
-                    {% for friend in friends %}
-                    <div class="account-directory-row people-friend-row" data-account-name="{{ friend.username|lower }}">
-                        <a class="people-person-link" href="/chat/{{ friend.id }}">
-                            <div class="avatar{% if friend.id in online_users %} is-online{% endif %}" data-user-id="{{ friend.id }}">{% if can_view_profile_picture(friend) %}<img src="/avatar/{{ friend.id }}" alt="">{% else %}{{ friend.username[0].upper() }}{% endif %}</div>
-                            <span class="account-directory-name">{{ friend.username }}</span>
-                        </a>
-                        <span class="friend-connected-label">Friends <b>✓</b></span>
-                        <form method="POST" action="/remove_friend/{{ friend.id }}" class="account-remove-form" onsubmit="return confirm('Remove {{ friend.username }} from your friends?')">
-                            <button type="submit" aria-label="Remove {{ friend.username }}" title="Remove friend">Remove</button>
-                        </form>
-                    </div>
-                    {% else %}<p class="people-empty">No friends yet. Open Discover to find people.</p>{% endfor %}
-                </div>
-
-                <div class="account-directory-list people-panel" id="discover-panel" role="tabpanel" aria-labelledby="discover-tab" data-people-panel="discover" hidden>
-                    {% for account in discover_accounts %}
-                    <div class="account-directory-row" data-account-name="{{ account.username|lower }}">
-                        <div class="avatar{% if account.id in online_users %} is-online{% endif %}" data-user-id="{{ account.id }}">
-                            {% if can_view_profile_picture(account) %}<img src="/avatar/{{ account.id }}" alt="">{% else %}{{ account.username[0].upper() }}{% endif %}
-                        </div>
-                        <span class="account-directory-name">{{ account.username }}</span>
-                        {% if account.id in incoming_request_by_user %}
-                        <form method="POST" action="/friend_request/{{ incoming_request_by_user[account.id] }}/accept"><button type="submit" class="account-add-button">Accept</button></form>
-                        {% elif account.id in outgoing_ids %}
-                        <span class="account-already-friend">Request sent</span>
-                        {% else %}
-                        {% if account.allow_messages_from == 'everyone' %}<a class="account-add-button" href="/chat/{{ account.id }}">Message</a>{% endif %}
-                        <form method="POST" action="/add_friend">
-                            <input type="hidden" name="username" value="{{ account.username }}">
-                            <button type="submit" class="account-add-button">Add Friend</button>
-                        </form>
-                        {% endif %}
-                    </div>
-                    {% else %}<p class="people-empty">No new people to discover right now.</p>{% endfor %}
-                </div>
-                <p class="account-search-empty" id="account-search-empty" hidden>No people match that search.</p>
-            </section>
+        <div class="people-tabs" role="tablist" aria-label="People">
+            <button type="button" class="people-tab{% if active_people_tab == 'friends' %} active{% endif %}" id="friends-tab" role="tab" aria-selected="{{ 'true' if active_people_tab == 'friends' else 'false' }}" aria-controls="friends-panel" data-people-tab="friends">Friends <span>{{ friends|length }}</span></button>
+            <button type="button" class="people-tab{% if active_people_tab == 'discover' %} active{% endif %}" id="discover-tab" role="tab" aria-selected="{{ 'true' if active_people_tab == 'discover' else 'false' }}" aria-controls="discover-panel" data-people-tab="discover">Discover <span>{{ discover_accounts|length }}</span></button>
         </div>
+
+        <div class="account-directory-list people-panel" id="friends-panel" role="tabpanel" aria-labelledby="friends-tab" data-people-panel="friends" {% if active_people_tab != 'friends' %}hidden{% endif %}>
+            {% for friend in friends %}
+            <div class="account-directory-row people-friend-row" data-account-name="{{ friend.username|lower }}">
+                <a class="people-person-link" href="/chat/{{ friend.id }}">
+                    <div class="avatar{% if friend.id in online_users %} is-online{% endif %}" data-user-id="{{ friend.id }}">{% if can_view_profile_picture(friend) %}<img src="/avatar/{{ friend.id }}" alt="">{% else %}{{ friend.username[0].upper() }}{% endif %}</div>
+                    <span class="account-directory-name">{{ friend.username }}</span>
+                </a>
+                <span class="friend-connected-label">Friends <b>✓</b></span>
+                <form method="POST" action="/remove_friend/{{ friend.id }}" class="account-remove-form" onsubmit="return confirm('Remove {{ friend.username }} from your friends?')">
+                    <input type="hidden" name="return_to" value="/people"><button type="submit" aria-label="Remove {{ friend.username }}" title="Remove friend">Remove</button>
+                </form>
+            </div>
+            {% else %}<p class="people-empty">No friends yet. Open Discover to find people.</p>{% endfor %}
+        </div>
+
+        <div class="account-directory-list people-panel" id="discover-panel" role="tabpanel" aria-labelledby="discover-tab" data-people-panel="discover" {% if active_people_tab != 'discover' %}hidden{% endif %}>
+            {% for account in discover_accounts %}
+            <div class="account-directory-row" data-account-name="{{ account.username|lower }}">
+                <div class="avatar{% if account.id in online_users %} is-online{% endif %}" data-user-id="{{ account.id }}">
+                    {% if can_view_profile_picture(account) %}<img src="/avatar/{{ account.id }}" alt="">{% else %}{{ account.username[0].upper() }}{% endif %}
+                </div>
+                <span class="account-directory-name">{{ account.username }}</span>
+                {% if account.id in incoming_request_by_user %}
+                <form method="POST" action="/friend_request/{{ incoming_request_by_user[account.id] }}/accept"><input type="hidden" name="return_to" value="/people"><button type="submit" class="account-add-button">Accept</button></form>
+                {% elif account.id in outgoing_ids %}
+                <span class="account-already-friend">Request sent</span>
+                <a class="account-add-button" href="/chat/{{ account.id }}">Message</a>
+                <form method="POST" action="/remove_friend/{{ account.id }}" class="account-remove-form"><input type="hidden" name="return_to" value="/people"><button type="submit">Cancel request</button></form>
+                {% else %}
+                {% if account.allow_messages_from == 'everyone' %}<a class="account-add-button" href="/chat/{{ account.id }}">Message</a>{% endif %}
+                <form method="POST" action="/add_friend"><input type="hidden" name="return_to" value="/people"><input type="hidden" name="username" value="{{ account.username }}"><button type="submit" class="account-add-button">Add Friend</button></form>
+                {% endif %}
+            </div>
+            {% else %}<p class="people-empty">No new people to discover right now.</p>{% endfor %}
+        </div>
+        <p class="account-search-empty" id="account-search-empty" hidden>No people match that search.</p>
     </section>
 </main>
-
+{% endblock %}
+{% block scripts %}
 <script>
-const conversationSearch = document.getElementById("conversation-search");
-conversationSearch?.addEventListener("input", () => {
-    const query = conversationSearch.value.trim().toLocaleLowerCase();
-    const rows = [...document.querySelectorAll(".conversation-row")];
-    let visible = 0;
-    rows.forEach((row) => {
-        const matches = row.dataset.conversationSearch.includes(query);
-        row.hidden = !matches;
-        if (matches) visible++;
-    });
-    document.getElementById("conversation-search-empty").hidden = visible > 0 || rows.length === 0;
-});
-
 const accountSearch = document.getElementById("account-search");
 const peopleTabs = [...document.querySelectorAll("[data-people-tab]")];
 const peoplePanels = [...document.querySelectorAll("[data-people-panel]")];
@@ -148,13 +99,7 @@ function filterPeople() {
 }
 peopleTabs.forEach((tab) => tab.addEventListener("click", () => selectPeopleTab(tab.dataset.peopleTab)));
 accountSearch?.addEventListener("input", filterPeople);
-document.querySelectorAll("[data-open-people-tab]").forEach((link) => link.addEventListener("click", () => {
-    const requested = link.dataset.openPeopleTab;
-    const tab = peopleTabs.find((button) => button.dataset.peopleTab === requested);
-    if (tab) selectPeopleTab(requested);
-}));
-if (window.location.hash === "#people-directory" || window.location.hash === "#discover-panel") {
-    selectPeopleTab("discover");
-}
+selectPeopleTab({{ active_people_tab|tojson }});
+if (window.location.hash === "#discover-panel") selectPeopleTab("discover");
 </script>
 {% endblock %}

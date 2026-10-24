@@ -121,10 +121,22 @@
                 {% endfor %}
             </div>
 
+            {% if pending_message_remaining is not none %}
+            <div class="pending-message-notice{% if pending_message_remaining == 0 %} is-limit-reached{% endif %}"
+                 id="pending-message-notice" role="status"
+                 data-recipient-name="{{ friend.username }}" data-remaining="{{ pending_message_remaining }}">
+                {% if pending_message_remaining == 0 %}
+                    You can't send more messages until {{ friend.username }} accepts your friend request.
+                {% else %}
+                    {{ pending_message_remaining }} {{ 'message' if pending_message_remaining == 1 else 'messages' }} remaining before {{ friend.username }} accepts your friend request.
+                {% endif %}
+            </div>
+            {% endif %}
+
             <form class="chat-form" id="chat-form">
                 <div class="chat-emoji-tools">
-                    <button type="button" id="emojiBtn" title="Emoji" aria-label="Choose an emoji" aria-expanded="false">&#128516;</button>
-                    <button type="button" id="stickerBtn" title="Stickers" aria-label="Choose a sticker" aria-expanded="false">✿</button>
+                    <button type="button" id="emojiBtn" title="Emoji" aria-label="Choose an emoji" aria-expanded="false" {% if pending_message_remaining == 0 %}disabled{% endif %}>&#128516;</button>
+                    <button type="button" id="stickerBtn" title="Stickers" aria-label="Choose a sticker" aria-expanded="false" {% if pending_message_remaining == 0 %}disabled{% endif %}>✿</button>
                 </div>
                 <div class="chat-emoji-picker emoji-searchable-picker" id="chat-emoji-picker" hidden aria-label="Choose an emoji">
                     <input type="search" class="emoji-search" data-emoji-search placeholder="Search emojis..." aria-label="Search emojis">
@@ -163,13 +175,13 @@
                         <label for="sticker-upload-pack">Pack name</label><input type="text" id="sticker-upload-pack" maxlength="60" placeholder="My stickers">
                         <input type="file" id="sticker-upload-file" accept="image/png,image/jpeg,image/webp,image/gif" hidden>
                         <div class="sticker-crop-editor" id="sticker-crop-editor" hidden><div class="sticker-crop-frame"><img id="sticker-crop-preview" alt="Sticker crop preview"></div><label for="sticker-crop-zoom">Crop</label><input type="range" id="sticker-crop-zoom" min="1" max="2.5" step="0.05" value="1"></div>
-                        <button type="button" id="sticker-upload-button">＋ Create from photo</button>
+                        <button type="button" id="sticker-upload-button" {% if pending_message_remaining == 0 %}disabled{% endif %}>＋ Create from photo</button>
                         <small>PNG, JPG, WebP or animated GIF · max 5 MB. Crop photos before saving.</small>
                     </div>
                 </section>
                 <input type="text" id="messageInput" placeholder="Type a message..."
-                       autocomplete="off" maxlength="2000" required>
-                <button type="submit" id="sendBtn">Send</button>
+                       autocomplete="off" maxlength="2000" required {% if pending_message_remaining == 0 %}disabled{% endif %}>
+                <button type="submit" id="sendBtn" {% if pending_message_remaining == 0 %}disabled{% endif %}>Send</button>
             </form>
             <div class="chat-action-feedback" id="chat-action-feedback" aria-live="polite"></div>
 
@@ -203,6 +215,7 @@ const friendId = {{ friend.id }};
 const chatBox = document.getElementById("chat-box");
 const form = document.getElementById("chat-form");
 const input = document.getElementById("messageInput");
+const pendingMessageNotice = document.getElementById("pending-message-notice");
 const typingBox = document.getElementById("typing-indicator");
 const actionFeedback = document.getElementById("chat-action-feedback");
 const forwardDialog = document.getElementById("forward-dialog");
@@ -214,6 +227,33 @@ function showActionFeedback(message) {
     actionFeedback.textContent = message;
     clearTimeout(feedbackTimeout);
     feedbackTimeout = setTimeout(() => { actionFeedback.textContent = ""; }, 2500);
+}
+
+function updatePendingMessageState(data) {
+    if (!pendingMessageNotice || Number(data.friend_id) !== friendId) return;
+    const composerControls = form.querySelectorAll("button, input");
+    if (data.state === "accepted") {
+        pendingMessageNotice.hidden = true;
+        composerControls.forEach((control) => { control.disabled = false; });
+        showActionFeedback("Friend request accepted. You can now send messages freely.");
+        return;
+    }
+    if (data.state === "unavailable") {
+        pendingMessageNotice.hidden = false;
+        pendingMessageNotice.classList.add("is-limit-reached");
+        pendingMessageNotice.textContent = "This friend request is no longer active. You can't send messages.";
+        composerControls.forEach((control) => { control.disabled = true; });
+        return;
+    }
+    const remaining = Math.max(0, Number(data.remaining) || 0);
+    const recipientName = data.recipient_name || pendingMessageNotice.dataset.recipientName;
+    pendingMessageNotice.dataset.remaining = String(remaining);
+    pendingMessageNotice.hidden = false;
+    pendingMessageNotice.classList.toggle("is-limit-reached", remaining === 0);
+    pendingMessageNotice.textContent = remaining === 0
+        ? `You can't send more messages until ${recipientName} accepts your friend request.`
+        : `${remaining} ${remaining === 1 ? "message" : "messages"} remaining before ${recipientName} accepts your friend request.`;
+    composerControls.forEach((control) => { control.disabled = remaining === 0; });
 }
 
 const chatThemeToggle = document.getElementById("chat-theme-toggle");
@@ -395,6 +435,7 @@ socket.on("receive_message", (data) => {
         filterStickers();
     }
 });
+socket.on("pending_message_status", updatePendingMessageState);
 socket.on("sticker_pack_shared", (data) => {
     if (data.sender_id === CURRENT_USER_ID) return;
     (data.stickers || []).forEach((sticker) => {
@@ -501,7 +542,10 @@ forwardForm.addEventListener("submit", (event) => {
         message_id: forwardingMessageId,
         target_id: targetId
     }, (result) => {
-        showActionFeedback(result?.ok ? "Message forwarded" : "Could not forward message");
+        showActionFeedback(result?.ok ? "Message forwarded" :
+            result?.error === "message_limit"
+                ? `You can't send more messages until ${result.recipient_name || "your friend"} accepts your friend request.`
+                : "Could not forward message");
     });
     forwardingMessageId = null;
     forwardDialog.close();

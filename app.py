@@ -6,13 +6,13 @@ import smtplib
 import ssl
 import uuid
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from flask import (
     Flask, render_template, request, redirect, session, flash, abort, url_for, jsonify, send_from_directory
 )
 from flask_sqlalchemy import SQLAlchemy
-from sqlalchemy import inspect, text
+from sqlalchemy import func, inspect, text, update
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 from werkzeug.security import generate_password_hash, check_password_hash
 
@@ -37,16 +37,16 @@ MAX_PROFILE_IMAGE_BYTES = 3 * 1024 * 1024
 MAX_STATUS_MEDIA_BYTES = 25 * 1024 * 1024
 RESET_TOKEN_MAX_AGE = 60 * 60
 CHAT_THEMES = {
-    "forest": {"label": "Midnight", "bg": "#111827", "sent": "#C2185B", "received": "#1F2937", "accent": "#2563EB"},
-    "mint": {"label": "Navy", "bg": "#1F2937", "sent": "#C2185B", "received": "#111827", "accent": "#2563EB"},
-    "ocean": {"label": "Royal blue", "bg": "#111827", "sent": "#C2185B", "received": "#1F2937", "accent": "#2563EB"},
-    "sky": {"label": "Night sky", "bg": "#1F2937", "sent": "#C2185B", "received": "#111827", "accent": "#2563EB"},
-    "lavender": {"label": "Soft pink", "bg": "#111827", "sent": "#C2185B", "received": "#1F2937", "accent": "#F8BBD0"},
-    "rose": {"label": "Rose", "bg": "#1F2937", "sent": "#C2185B", "received": "#111827", "accent": "#2563EB"},
-    "peach": {"label": "Blush", "bg": "#111827", "sent": "#C2185B", "received": "#1F2937", "accent": "#F8BBD0"},
-    "sunshine": {"label": "Starlight", "bg": "#1F2937", "sent": "#C2185B", "received": "#111827", "accent": "#2563EB"},
-    "plum": {"label": "Berry", "bg": "#111827", "sent": "#C2185B", "received": "#1F2937", "accent": "#F8BBD0"},
-    "midnight": {"label": "Midnight blue", "bg": "#111827", "sent": "#C2185B", "received": "#1F2937", "accent": "#2563EB"},
+    "forest": {"label": "Violet and lavender", "bg": "#FFFFFF", "sent": "#7C3AED", "received": "#EDE9FE", "accent": "#7C3AED"},
+    "mint": {"label": "Lavender mist", "bg": "#F5F3FF", "sent": "#7C3AED", "received": "#EDE9FE", "accent": "#7C3AED"},
+    "ocean": {"label": "Electric violet", "bg": "#FFFFFF", "sent": "#7C3AED", "received": "#EDE9FE", "accent": "#7C3AED"},
+    "sky": {"label": "Soft lavender", "bg": "#FFFFFF", "sent": "#7C3AED", "received": "#EDE9FE", "accent": "#7C3AED"},
+    "lavender": {"label": "Lavender light", "bg": "#F5F3FF", "sent": "#7C3AED", "received": "#FFFFFF", "accent": "#7C3AED"},
+    "rose": {"label": "Dusty mauve", "bg": "#FFFFFF", "sent": "#7C3AED", "received": "#EDE9FE", "accent": "#8B5E83"},
+    "peach": {"label": "Bright white", "bg": "#FFFFFF", "sent": "#7C3AED", "received": "#EDE9FE", "accent": "#7C3AED"},
+    "sunshine": {"label": "Soft violet", "bg": "#F5F3FF", "sent": "#7C3AED", "received": "#EDE9FE", "accent": "#7C3AED"},
+    "plum": {"label": "Violet mist", "bg": "#FFFFFF", "sent": "#7C3AED", "received": "#EDE9FE", "accent": "#7C3AED"},
+    "midnight": {"label": "Midnight violet", "bg": "#FFFFFF", "sent": "#7C3AED", "received": "#EDE9FE", "accent": "#7C3AED"},
 }
 STICKER_SEEDS = [
     ("Big laugh", "happy funny laugh lol", "😂", "Reactions"),
@@ -133,7 +133,11 @@ class User(db.Model):
     password = db.Column(db.String(200), nullable=False)
 
     avatar_url = db.Column(db.String(255), nullable=True)
+    full_name = db.Column(db.String(100), nullable=True)
     bio = db.Column(db.String(120), nullable=True)
+    birthday = db.Column(db.Date, nullable=True)
+    gender = db.Column(db.String(40), nullable=True)
+    location = db.Column(db.String(120), nullable=True)
     message_retention = db.Column(db.String(20), nullable=True, default="off")
     last_active_at = db.Column(db.DateTime, nullable=True)
     show_online_status = db.Column(db.Boolean, nullable=True, default=True)
@@ -143,6 +147,7 @@ class User(db.Model):
     avatar_visibility = db.Column(db.String(20), nullable=True, default="everyone")
     notifications_enabled = db.Column(db.Boolean, nullable=True, default=True)
     default_chat_theme = db.Column(db.String(20), nullable=True, default="forest")
+    appearance_mode = db.Column(db.String(10), nullable=True, default="light")
     created_at = db.Column(db.DateTime, default=utcnow)
 
 
@@ -151,6 +156,7 @@ class Friendship(db.Model):
     user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
     friend_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
     status = db.Column(db.String(20), nullable=True)
+    pending_message_count = db.Column(db.Integer, nullable=True, default=0)
 
 
 class UserBlock(db.Model):
@@ -165,6 +171,15 @@ class ChatPreference(db.Model):
     user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
     friend_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
     theme = db.Column(db.String(20), nullable=True, default="forest")
+
+
+class ConversationArchive(db.Model):
+    """A per-user archive marker; it never deletes the underlying messages."""
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    peer_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    created_at = db.Column(db.DateTime, default=utcnow)
+    __table_args__ = (db.UniqueConstraint("user_id", "peer_id", name="uq_conversation_archive_user_peer"),)
 
 
 class Message(db.Model):
@@ -225,6 +240,23 @@ class Status(db.Model):
     background = db.Column(db.String(20), nullable=True, default="forest")
     text_style = db.Column(db.String(20), nullable=True, default="classic")
     timestamp = db.Column(db.DateTime, default=utcnow)
+
+
+class StatusView(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    status_id = db.Column(db.Integer, db.ForeignKey("status.id"), nullable=False)
+    viewer_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    viewed_at = db.Column(db.DateTime, default=utcnow)
+    __table_args__ = (db.UniqueConstraint("status_id", "viewer_id", name="uq_status_view_status_viewer"),)
+
+
+class StatusReaction(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    status_id = db.Column(db.Integer, db.ForeignKey("status.id"), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    reaction = db.Column(db.String(16), nullable=False)
+    created_at = db.Column(db.DateTime, default=utcnow)
+    __table_args__ = (db.UniqueConstraint("status_id", "user_id", name="uq_status_reaction_status_user"),)
 
 
 class FeedPost(db.Model):
@@ -315,6 +347,74 @@ def are_friends(a, b):
     ).first() is not None
 
 
+PENDING_REQUEST_MESSAGE_LIMIT = 3
+
+
+def pending_friend_request(sender_id, receiver_id):
+    """Return the unaccepted request that permits a limited DM from its sender."""
+    return Friendship.query.filter_by(
+        user_id=sender_id, friend_id=receiver_id, status="pending"
+    ).first()
+
+
+def pending_message_remaining(sender_id, receiver_id):
+    request_row = pending_friend_request(sender_id, receiver_id)
+    if request_row is None:
+        return None
+    return max(0, PENDING_REQUEST_MESSAGE_LIMIT - int(request_row.pending_message_count or 0))
+
+
+def reserve_pending_message_slot(sender_id, receiver_id):
+    """Atomically reserve a request-message slot in the same transaction as its message."""
+    if not can_message(sender_id, receiver_id):
+        return False, None
+
+    request_row = pending_friend_request(sender_id, receiver_id)
+    if request_row is None:
+        return True, None
+
+    request_id = request_row.id
+    count = int(request_row.pending_message_count or 0)
+    if count >= PENDING_REQUEST_MESSAGE_LIMIT:
+        return False, 0
+
+    result = db.session.execute(
+        update(Friendship)
+        .where(
+            Friendship.id == request_id,
+            Friendship.status == "pending",
+            func.coalesce(Friendship.pending_message_count, 0) < PENDING_REQUEST_MESSAGE_LIMIT,
+        )
+        .values(pending_message_count=func.coalesce(Friendship.pending_message_count, 0) + 1)
+        .execution_options(synchronize_session=False)
+    )
+    if result.rowcount == 1:
+        return True, PENDING_REQUEST_MESSAGE_LIMIT - count - 1
+
+    # A concurrent accept removes the cap; a decline/cancel removes permission.
+    db.session.expire_all()
+    if can_message(sender_id, receiver_id) and pending_friend_request(sender_id, receiver_id) is None:
+        return True, None
+    return False, 0
+
+
+def emit_pending_message_status(sender_id, receiver_id):
+    db.session.expire_all()
+    request_row = pending_friend_request(sender_id, receiver_id)
+    if request_row:
+        receiver = db.session.get(User, receiver_id)
+        remaining = max(0, PENDING_REQUEST_MESSAGE_LIMIT - int(request_row.pending_message_count or 0))
+        payload = {
+            "friend_id": receiver_id, "recipient_name": receiver.username if receiver else "your friend",
+            "remaining": remaining, "state": "pending",
+        }
+    elif are_friends(sender_id, receiver_id):
+        payload = {"friend_id": receiver_id, "state": "accepted"}
+    else:
+        payload = {"friend_id": receiver_id, "state": "unavailable"}
+    socketio.emit("pending_message_status", payload, to=f"user_{sender_id}")
+
+
 def is_blocked(a, b):
     if a is None or b is None or a == b:
         return False
@@ -330,7 +430,8 @@ def can_message(sender_id, receiver_id):
     receiver = db.session.get(User, receiver_id)
     if receiver is None or receiver.allow_messages_from == "nobody":
         return False
-    return receiver.allow_messages_from == "everyone" or are_friends(sender_id, receiver_id)
+    return (receiver.allow_messages_from == "everyone" or are_friends(sender_id, receiver_id)
+            or pending_friend_request(sender_id, receiver_id) is not None)
 
 
 @app.template_global()
@@ -355,6 +456,14 @@ def current_notifications_enabled():
     viewer_id = session.get("user_id")
     current = db.session.get(User, viewer_id) if viewer_id else None
     return bool(current and current.notifications_enabled is not False)
+
+
+@app.template_global()
+def current_appearance_mode():
+    viewer_id = session.get("user_id")
+    current = db.session.get(User, viewer_id) if viewer_id else None
+    mode = current.appearance_mode if current else "light"
+    return mode if mode in {"light", "dark"} else "light"
 
 
 def room(a, b):
@@ -473,6 +582,52 @@ def home():
         })
     current_user = db.session.get(User, uid)
     return render_template("home.html", feed_items=feed_items, current_user=current_user)
+
+
+@app.route("/conversations/search")
+def search_conversation_messages():
+    if "user_id" not in session:
+        return jsonify({"peer_ids": []}), 401
+    uid = session["user_id"]
+    query = (request.args.get("q") or "").strip()[:100]
+    if not query:
+        return jsonify({"peer_ids": []})
+    # Escape SQL LIKE metacharacters so searches are literal.
+    escaped = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    matches = Message.query.filter(
+        (Message.sender_id == uid) | (Message.receiver_id == uid),
+        Message.content.ilike(f"%{escaped}%", escape="\\"),
+        (Message.expires_at.is_(None) | (Message.expires_at > utcnow())),
+    ).order_by(Message.timestamp.desc()).limit(250).all()
+    peer_ids = set()
+    for message in matches:
+        peer_id = message.receiver_id if message.sender_id == uid else message.sender_id
+        if can_message(uid, peer_id) or can_message(peer_id, uid):
+            peer_ids.add(peer_id)
+    return jsonify({"peer_ids": list(peer_ids)})
+
+
+@app.route("/chat/<int:fid>/archive", methods=["POST"])
+def archive_conversation(fid):
+    if "user_id" not in session:
+        return redirect("/login")
+    uid = session["user_id"]
+    if fid == uid or db.session.get(User, fid) is None:
+        abort(404)
+    if not (can_message(uid, fid) or can_message(fid, uid)):
+        abort(404)
+    action = request.form.get("action", "archive")
+    if action == "unarchive":
+        row = ConversationArchive.query.filter_by(user_id=uid, peer_id=fid).first()
+        if row:
+            db.session.delete(row)
+    elif action == "archive":
+        if not ConversationArchive.query.filter_by(user_id=uid, peer_id=fid).first():
+            db.session.add(ConversationArchive(user_id=uid, peer_id=fid))
+    else:
+        abort(400)
+    db.session.commit()
+    return redirect("/friends?filter=archived" if action == "archive" else "/friends")
 
 
 def save_social_media(file, folder):
@@ -711,6 +866,23 @@ def logout():
     return redirect("/logged-out")
 
 
+@app.route("/appearance", methods=["POST"])
+def update_appearance():
+    if "user_id" not in session:
+        return jsonify({"ok": False, "error": "Please log in"}), 401
+    data = request.get_json(silent=True) or request.form
+    mode = data.get("mode")
+    if mode not in {"light", "dark"}:
+        return jsonify({"ok": False, "error": "Choose light or dark mode"}), 400
+    user = db.session.get(User, session["user_id"])
+    if user is None:
+        session.clear()
+        return jsonify({"ok": False, "error": "Please log in"}), 401
+    user.appearance_mode = mode
+    db.session.commit()
+    return jsonify({"ok": True, "mode": mode})
+
+
 @app.route("/logged-out")
 def logged_out():
     return render_template("logged_out.html")
@@ -723,11 +895,11 @@ def friends():
 
     uid = session["user_id"]
     ids = get_friends(uid)
-
-    friends = User.query.filter(User.id.in_(ids)).all() if ids else []
     message_peer_ids = {row[0] for row in db.session.query(Message.sender_id).filter_by(receiver_id=uid).all()}
     message_peer_ids.update(row[0] for row in db.session.query(Message.receiver_id).filter_by(sender_id=uid).all())
-    conversation_ids = set(ids) | message_peer_ids
+    archive_rows = ConversationArchive.query.filter_by(user_id=uid).all()
+    archived_ids = {row.peer_id for row in archive_rows}
+    conversation_ids = set(ids) | message_peer_ids | archived_ids
     conversation_users = User.query.filter(User.id.in_(conversation_ids)).all() if conversation_ids else []
     conversation_users = [person for person in conversation_users
                           if can_message(uid, person.id) or can_message(person.id, uid)]
@@ -738,8 +910,9 @@ def friends():
             ((Message.sender_id == uid) & (Message.receiver_id == friend.id)) |
             ((Message.sender_id == friend.id) & (Message.receiver_id == uid))
         )
-        latest = Message.query.filter(conversation_filter).order_by(Message.id.desc()).first()
-        unread_count = Message.query.filter_by(sender_id=friend.id, receiver_id=uid, read_at=None).count()
+        available = Message.expires_at.is_(None) | (Message.expires_at > now)
+        latest = Message.query.filter(conversation_filter, available).order_by(Message.timestamp.desc(), Message.id.desc()).first()
+        unread_count = Message.query.filter_by(sender_id=friend.id, receiver_id=uid, read_at=None).filter(available).count()
         if latest is None:
             preview = "Start a conversation"
             timestamp = None
@@ -767,9 +940,18 @@ def friends():
         conversations.append({
             "friend": friend, "preview": preview, "timestamp": timestamp,
             "time_label": time_label, "unread_count": unread_count,
+            "archived": friend.id in archived_ids,
         })
     conversations.sort(key=lambda item: item["timestamp"] or datetime.min, reverse=True)
-    friends.sort(key=lambda user: user.username.lower())
+
+    return render_template(
+        "chats.html", conversations=conversations, online_users=visible_online_user_ids(uid),
+    )
+
+
+def people_directory_context(uid):
+    ids = get_friends(uid)
+    people_friends = User.query.filter(User.id.in_(ids)).order_by(User.username).all() if ids else []
     block_rows = UserBlock.query.filter((UserBlock.blocker_id == uid) | (UserBlock.blocked_id == uid)).all()
     hidden_account_ids = {row.blocker_id if row.blocked_id == uid else row.blocked_id for row in block_rows}
     accounts = [account for account in User.query.filter(User.id != uid).order_by(User.username).all()
@@ -788,19 +970,40 @@ def friends():
         row.friend_id for row in Friendship.query.filter_by(user_id=uid, status="pending").all()
     }
     incoming_request_by_user = {row.user_id: row.id for row in incoming_adds}
+    return {
+        "friends": people_friends,
+        "accounts": accounts,
+        "discover_accounts": discover_accounts,
+        "friend_ids": set(ids),
+        "incoming_requests": incoming_requests,
+        "incoming_request_by_user": incoming_request_by_user,
+        "outgoing_ids": outgoing_ids,
+        "online_users": visible_online_user_ids(uid),
+    }
 
+
+@app.route("/people")
+def people():
+    if "user_id" not in session:
+        return redirect("/login")
     return render_template(
-        "friends.html",
-        friends=friends,
-        conversations=conversations,
-        accounts=accounts,
-        discover_accounts=discover_accounts,
-        friend_ids=set(ids),
-        incoming_requests=incoming_requests,
-        incoming_request_by_user=incoming_request_by_user,
-        outgoing_ids=outgoing_ids,
-        online_users=visible_online_user_ids(session["user_id"])
+        "friends.html", **people_directory_context(session["user_id"]),
+        active_people_tab="friends",
     )
+
+
+@app.route("/explore")
+def explore():
+    if "user_id" not in session:
+        return redirect("/login")
+    return render_template("explore.html", current_user=db.session.get(User, session["user_id"]))
+
+
+def friend_action_redirect():
+    destination = request.form.get("return_to", "/friends")
+    if destination not in {"/people", "/friends"}:
+        destination = "/friends"
+    return redirect(destination)
 
 
 @app.route("/add_friend", methods=["POST"])
@@ -813,7 +1016,7 @@ def add_friend():
 
     if not username:
         flash("Enter a username", "error")
-        return redirect("/friends")
+        return friend_action_redirect()
 
     other = User.query.filter_by(username=username).first()
     existing = None
@@ -841,7 +1044,7 @@ def add_friend():
         db.session.commit()
         flash(f"Friend request sent to {other.username}", "success")
 
-    return redirect("/friends")
+    return friend_action_redirect()
 
 
 @app.route("/friend_request/<int:request_id>/<action>", methods=["POST"])
@@ -854,6 +1057,7 @@ def respond_friend_request(request_id, action):
     friend_request = Friendship.query.filter_by(
         id=request_id, friend_id=session["user_id"], status="pending"
     ).first_or_404()
+    requester_id, recipient_id = friend_request.user_id, friend_request.friend_id
     requester = db.session.get(User, friend_request.user_id)
     if action == "accept":
         friend_request.status = "accepted"
@@ -862,7 +1066,8 @@ def respond_friend_request(request_id, action):
         db.session.delete(friend_request)
         flash("Friend request declined", "success")
     db.session.commit()
-    return redirect("/friends")
+    emit_pending_message_status(requester_id, recipient_id)
+    return friend_action_redirect()
 
 
 @app.route("/remove_friend/<int:fid>", methods=["POST"])
@@ -875,12 +1080,15 @@ def remove_friend(fid):
         ((Friendship.user_id == uid) & (Friendship.friend_id == fid)) |
         ((Friendship.user_id == fid) & (Friendship.friend_id == uid))
     ).all()
+    pending_senders = [(row.user_id, row.friend_id) for row in rows if row.status == "pending"]
     if rows:
         for row in rows:
             db.session.delete(row)
         db.session.commit()
         flash("Friend removed", "success")
-    return redirect("/friends")
+        for sender_id, receiver_id in pending_senders:
+            emit_pending_message_status(sender_id, receiver_id)
+    return friend_action_redirect()
 
 
 @app.route("/status", methods=["GET", "POST"])
@@ -981,11 +1189,161 @@ def status_page():
     ).order_by(Status.timestamp.desc()).all() if visible_ids else []
     own_statuses = [(status, author) for status, author in statuses if author.id == uid]
     friend_statuses = [(status, author) for status, author in statuses if author.id != uid]
+    status_ids = [status.id for status, _author in statuses]
+    seen_ids = {row.status_id for row in StatusView.query.filter(
+        StatusView.viewer_id == uid, StatusView.status_id.in_(status_ids)
+    ).all()} if status_ids else set()
+    reaction_rows = StatusReaction.query.filter(StatusReaction.status_id.in_(status_ids)).all() if status_ids else []
+    reaction_counts = {}
+    my_reactions = {}
+    for row in reaction_rows:
+        counts = reaction_counts.setdefault(row.status_id, {})
+        counts[row.reaction] = counts.get(row.reaction, 0) + 1
+        if row.user_id == uid:
+            my_reactions[row.status_id] = row.reaction
+
+    viewer_stories = []
+    grouped_stories = {}
+    for status, author in statuses:
+        created_at = status.timestamp or utcnow()
+        expires_at = created_at + timedelta(hours=12)
+        item = {
+            "id": status.id,
+            "user_id": author.id,
+            "author": "You" if author.id == uid else author.username,
+            "username": author.username,
+            "avatar_url": url_for("user_avatar", user_id=author.id) if can_view_profile_picture(author) else None,
+            "initial": (author.username or "?")[0].upper(),
+            "content": status.content or "",
+            "media_url": status.media_url or "",
+            "media_type": status.media_type or "",
+            "background": status.background or "forest",
+            "text_style": status.text_style or "classic",
+            "timestamp": created_at.isoformat() + "Z",
+            "time_label": created_at.strftime("%b %d, %H:%M") + " UTC",
+            "expires_at": expires_at.isoformat() + "Z",
+            "delete_url": url_for("delete_status", status_id=status.id) if author.id == uid else "",
+            "seen": status.id in seen_ids or author.id == uid,
+            "reactions": reaction_counts.get(status.id, {}),
+            "my_reaction": my_reactions.get(status.id, ""),
+        }
+        viewer_stories.append(item)
+        group = grouped_stories.get(author.id)
+        if group is None:
+            group = {"user_id": author.id, "username": author.username,
+                     "initial": item["initial"], "avatar_url": item["avatar_url"],
+                     "unseen": False, "start_index": len(viewer_stories) - 1}
+            grouped_stories[author.id] = group
+        if not item["seen"]:
+            group["unseen"] = True
+
     return render_template(
         "status.html", own_statuses=own_statuses,
         friend_statuses=friend_statuses, current_user_id=uid,
-        current_user=db.session.get(User, uid)
+        current_user=db.session.get(User, uid), viewer_stories=viewer_stories,
+        story_authors=list(grouped_stories.values()),
     )
+
+
+@app.post("/status/<int:status_id>/view")
+def view_status(status_id):
+    uid = session.get("user_id")
+    if uid is None:
+        return jsonify(ok=False, error="Sign in to view updates"), 401
+    status = db.session.get(Status, status_id)
+    cutoff = utcnow() - timedelta(hours=12)
+    if not status or status.timestamp < cutoff or (status.user_id != uid and
+            (status.user_id not in get_friends(uid) or is_blocked(uid, status.user_id))):
+        return jsonify(ok=False, error="This update is no longer available"), 404
+    if status.user_id != uid and not StatusView.query.filter_by(status_id=status_id, viewer_id=uid).first():
+        db.session.add(StatusView(status_id=status_id, viewer_id=uid))
+        db.session.commit()
+    return jsonify(ok=True)
+
+
+@app.post("/status/<int:status_id>/react")
+def react_to_status(status_id):
+    uid = session.get("user_id")
+    if uid is None:
+        return jsonify(ok=False, error="Sign in to react"), 401
+    status = db.session.get(Status, status_id)
+    allowed = {"❤️", "😂", "😮", "😢", "👏", "🔥"}
+    reaction = (request.get_json(silent=True) or {}).get("reaction", "")
+    if not status or status.timestamp < utcnow() - timedelta(hours=12) or (
+            status.user_id != uid and (status.user_id not in get_friends(uid) or is_blocked(uid, status.user_id))):
+        return jsonify(ok=False, error="This update is no longer available"), 404
+    if reaction not in allowed:
+        return jsonify(ok=False, error="Choose a supported reaction"), 400
+    existing = StatusReaction.query.filter_by(status_id=status_id, user_id=uid).first()
+    if existing and existing.reaction == reaction:
+        db.session.delete(existing)
+        mine = ""
+    elif existing:
+        existing.reaction = reaction
+        existing.created_at = utcnow()
+        mine = reaction
+    else:
+        db.session.add(StatusReaction(status_id=status_id, user_id=uid, reaction=reaction))
+        mine = reaction
+    db.session.commit()
+    rows = StatusReaction.query.filter_by(status_id=status_id).all()
+    counts = {}
+    for row in rows:
+        counts[row.reaction] = counts.get(row.reaction, 0) + 1
+    payload = {"status_id": status_id, "counts": counts}
+    socketio.emit("status_reaction", payload, to=f"user_{status.user_id}")
+    return jsonify(ok=True, my_reaction=mine, counts=counts)
+
+
+@app.post("/status/<int:status_id>/reply")
+def reply_to_status(status_id):
+    uid = session.get("user_id")
+    if uid is None:
+        return jsonify(ok=False, error="Sign in to reply"), 401
+    status = db.session.get(Status, status_id)
+    content = ((request.get_json(silent=True) or {}).get("content") or "").strip()
+    if not status or status.user_id == uid or status.timestamp < utcnow() - timedelta(hours=12) or (
+            status.user_id not in get_friends(uid) or is_blocked(uid, status.user_id)):
+        return jsonify(ok=False, error="This update is no longer available"), 404
+    if not content:
+        return jsonify(ok=False, error="Write a reply first"), 400
+    if len(content) > MAX_MESSAGE_LEN:
+        return jsonify(ok=False, error=f"Reply must be {MAX_MESSAGE_LEN} characters or fewer"), 400
+    if not can_message(uid, status.user_id):
+        return jsonify(ok=False, error="This person is not accepting private messages"), 403
+    allowed, remaining = reserve_pending_message_slot(uid, status.user_id)
+    if not allowed:
+        return jsonify(ok=False, error="You can't send more messages until your friend accepts your request."), 403
+    now = utcnow()
+    sender = db.session.get(User, uid)
+    recipient = db.session.get(User, status.user_id)
+    room_name = room(uid, status.user_id)
+    recipient_is_viewing = bool(chat_room_viewers.get(room_name, {}).get(status.user_id))
+    retention = sender.message_retention if sender else "off"
+    message = Message(sender_id=uid, receiver_id=status.user_id, content=content,
+                      message_type="text", timestamp=now, expires_at=message_expiry(retention, now),
+                      delete_after_seen=retention == "seen",
+                      read_receipt_hidden=bool(recipient_is_viewing and recipient and recipient.show_read_receipts is False))
+    if recipient_is_viewing:
+        message.delivered_at = now
+        message.read_at = now
+    db.session.add(message)
+    db.session.commit()
+    if remaining is not None:
+        emit_pending_message_status(uid, status.user_id)
+    payload = {"id": message.id, "content": message.content, "message_type": "text",
+               "sender_id": uid, "receiver_id": status.user_id, "time": now.strftime("%H:%M"),
+               "receipt": "seen" if message.read_at and not message.read_receipt_hidden else
+                         ("delivered" if message.delivered_at else "sent"),
+               "expires_at": message.expires_at.isoformat() if message.expires_at else None}
+    socketio.emit("receive_message", payload, room=room_name)
+    notify_inbox(status.user_id, {"sender_id": uid, "receiver_id": status.user_id,
+                                  "content": content, "message_type": "text"})
+    if recipient_is_viewing and retention == "seen":
+        db.session.delete(message)
+        db.session.commit()
+        socketio.emit("message_deleted", {"id": message.id}, room=room_name)
+    return jsonify(ok=True, message="Private reply sent")
 
 
 @app.route("/status/<int:status_id>/delete", methods=["POST"])
@@ -1024,8 +1382,21 @@ def profile(user_id=None):
         abort(403)
 
     if request.method == "POST":
+        full_name = (request.form.get("full_name") or "").strip()
+        username = (request.form.get("username") or "").strip()
         bio = (request.form.get("bio") or "").strip()
         email = (request.form.get("email") or "").strip().lower()
+        birthday_raw = (request.form.get("birthday") or "").strip()
+        gender = (request.form.get("gender") or "").strip()
+        location = (request.form.get("location") or "").strip()
+        birthday = None
+        birthday_invalid = False
+        if birthday_raw:
+            try:
+                birthday = date.fromisoformat(birthday_raw)
+                birthday_invalid = birthday > date.today()
+            except ValueError:
+                birthday_invalid = True
         remove_picture = request.form.get("remove_picture") == "on"
         image = request.files.get("profile_picture")
         image_bytes = image.read(MAX_PROFILE_IMAGE_BYTES + 1) if image and image.filename else None
@@ -1043,6 +1414,18 @@ def profile(user_id=None):
             flash("Enter a valid recovery email address", "error")
         elif email and User.query.filter(User.email == email, User.id != user.id).first():
             flash("That email address is already used by another account", "error")
+        elif not username or len(username) > 50:
+            flash("Username must be between 1 and 50 characters", "error")
+        elif User.query.filter(User.username == username, User.id != user.id).first():
+            flash("That username is already in use", "error")
+        elif len(full_name) > 100:
+            flash("Full name must be 100 characters or fewer", "error")
+        elif birthday_invalid:
+            flash("Enter a valid birthday that is not in the future", "error")
+        elif len(gender) > 40:
+            flash("Gender must be 40 characters or fewer", "error")
+        elif len(location) > 120:
+            flash("Location must be 120 characters or fewer", "error")
         elif len(bio) > 120:
             flash("Your bio must be 120 characters or fewer", "error")
         else:
@@ -1056,8 +1439,13 @@ def profile(user_id=None):
                 user.avatar_url = f"/static/uploads/{filename}"
             elif remove_picture:
                 user.avatar_url = None
+            user.full_name = full_name or None
+            user.username = username
             user.email = email or None
             user.bio = bio
+            user.birthday = birthday
+            user.gender = gender or None
+            user.location = location or None
             db.session.commit()
             flash("Profile updated", "success")
             return redirect("/profile")
@@ -1066,7 +1454,7 @@ def profile(user_id=None):
         "profile.html", user=user, is_owner=is_owner,
         online_users=(online_user_ids() if is_owner else visible_online_user_ids(session.get("user_id"))),
         self_is_online=(user.id in online_user_ids()),
-        back_chat_id=back_chat_id
+        back_chat_id=back_chat_id, today_iso=date.today().isoformat()
     )
 
 
@@ -1204,6 +1592,7 @@ def delete_user_account(user):
     Friendship.query.filter((Friendship.user_id == uid) | (Friendship.friend_id == uid)).delete(synchronize_session=False)
     UserBlock.query.filter((UserBlock.blocker_id == uid) | (UserBlock.blocked_id == uid)).delete(synchronize_session=False)
     ChatPreference.query.filter((ChatPreference.user_id == uid) | (ChatPreference.friend_id == uid)).delete(synchronize_session=False)
+    ConversationArchive.query.filter((ConversationArchive.user_id == uid) | (ConversationArchive.peer_id == uid)).delete(synchronize_session=False)
     Status.query.filter_by(user_id=uid).delete(synchronize_session=False)
     FeedComment.query.filter((FeedComment.user_id == uid) | (FeedComment.post_id.in_(post_ids) if post_ids else False)).delete(synchronize_session=False)
     FeedReaction.query.filter((FeedReaction.user_id == uid) | (FeedReaction.post_id.in_(post_ids) if post_ids else False)).delete(synchronize_session=False)
@@ -1313,6 +1702,7 @@ def chat(fid):
     sticker_map = {item.id: item for item in Sticker.query.filter(
         Sticker.id.in_([int(m.content) for m in messages if m.message_type == "sticker" and m.content.isdigit()])
     ).all()} if any(m.message_type == "sticker" and m.content.isdigit() for m in messages) else {}
+    pending_remaining = pending_message_remaining(uid, fid)
     return render_template(
         "chat.html",
         friend=friend,
@@ -1327,6 +1717,7 @@ def chat(fid):
         stickers=stickers,
         sticker_preferences=sticker_preferences,
         sticker_map=sticker_map,
+        pending_message_remaining=pending_remaining,
     )
 
 
@@ -1635,6 +2026,11 @@ def handle_send_message(data):
     if not content:
         return
 
+    slot_reserved, remaining = reserve_pending_message_slot(uid, fid)
+    if not slot_reserved:
+        emit_pending_message_status(uid, fid)
+        return
+
     # sender_id comes from the session, so a client cannot impersonate.
     sender = db.session.get(User, uid)
     retention = sender.message_retention if sender else "off"
@@ -1659,6 +2055,8 @@ def handle_send_message(data):
 
     db.session.add(msg)
     db.session.commit()
+    if remaining is not None:
+        emit_pending_message_status(uid, fid)
 
     emit("receive_message", {
         "id": msg.id,
@@ -1695,6 +2093,11 @@ def handle_send_sticker(data):
     ).first():
         return
 
+    slot_reserved, remaining = reserve_pending_message_slot(uid, fid)
+    if not slot_reserved:
+        emit_pending_message_status(uid, fid)
+        return
+
     now = utcnow()
     sender = db.session.get(User, uid)
     recipient = db.session.get(User, fid)
@@ -1723,6 +2126,8 @@ def handle_send_sticker(data):
         db.session.add(StickerShare(sticker_id=sticker_id, user_id=fid))
     db.session.add(message)
     db.session.commit()
+    if remaining is not None:
+        emit_pending_message_status(uid, fid)
     payload = {"id": message.id, "content": message.content, "message_type": "sticker",
                "sender_id": uid, "receiver_id": fid, "time": now.strftime("%H:%M"),
                "receipt": "seen" if message.read_at and not message.read_receipt_hidden else ("delivered" if message.delivered_at else "sent"),
@@ -1811,6 +2216,13 @@ def handle_forward_message(data):
     if source is None:
         return {"ok": False}
 
+    slot_reserved, remaining = reserve_pending_message_slot(uid, target_id)
+    if not slot_reserved:
+        emit_pending_message_status(uid, target_id)
+        target = db.session.get(User, target_id)
+        return {"ok": False, "error": "message_limit",
+                "recipient_name": target.username if target else "your friend"}
+
     target_room = room(uid, target_id)
     target_is_viewing = bool(chat_room_viewers.get(target_room, {}).get(target_id))
     sender = db.session.get(User, uid)
@@ -1845,6 +2257,8 @@ def handle_forward_message(data):
             db.session.add(StickerShare(sticker_id=forwarded_sticker.id, user_id=target_id))
     db.session.add(forwarded)
     db.session.commit()
+    if remaining is not None:
+        emit_pending_message_status(uid, target_id)
 
     payload = {
         "id": forwarded.id,
