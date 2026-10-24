@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block content %}
+<main class="auth-page">
+    <section class="auth-card" aria-labelledby="username-setup-title">
+        <p class="login-eyebrow">ONE LAST STEP</p>
+        <h1 id="username-setup-title">Choose your CHATTI username</h1>
+        <p>Your username is how friends find and recognise you. Your email stays private.</p>
+        <form method="POST" class="legacy-account-form">
+            <label for="account-username">Username</label>
+            <input id="account-username" name="username" minlength="3" maxlength="50"
+                   pattern="[A-Za-z0-9_.]{3,50}" autocomplete="username" required autofocus>
+            <small>Use 3–50 letters, numbers, dots, or underscores.</small>
+            <button type="submit">Save username</button>
+        </form>
+    </section>
+</main>
+{% endblock %}

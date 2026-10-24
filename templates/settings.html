@@ -8,6 +8,19 @@
         <p class="settings-intro">Make CHATTI work the way you want. Your choices are saved to your account.</p>
 
         <section class="settings-section">
+            <form method="POST" class="settings-form" id="appearance-settings-form">
+                <input type="hidden" name="section" value="appearance">
+                <fieldset>
+                    <legend>Appearance</legend>
+                    <p class="settings-help">Dark violet is the default. Your choice is saved to your account.</p>
+                    <label class="retention-option"><input type="radio" name="appearance_mode" value="dark" {% if (user.appearance_mode or 'dark') == 'dark' %}checked{% endif %}><span><strong>Dark mode</strong><small>Deep violet background, purple surfaces, and light lavender text.</small></span></label>
+                    <label class="retention-option"><input type="radio" name="appearance_mode" value="light" {% if user.appearance_mode == 'light' %}checked{% endif %}><span><strong>Light mode</strong><small>White surfaces with Electric Violet accents.</small></span></label>
+                </fieldset>
+                <button type="submit" class="settings-save-button">Save appearance</button>
+            </form>
+        </section>
+
+        <section class="settings-section">
             <form method="POST" class="settings-form">
                 <input type="hidden" name="section" value="presence">
                 <fieldset>
@@ -50,6 +63,9 @@
                             <option value="friends" {% if avatar_access == 'friends' %}selected{% endif %}>Friends only</option>
                             <option value="nobody" {% if avatar_access == 'nobody' %}selected{% endif %}>Nobody</option>
                         </select>
+                    </label>
+                    <label class="retention-option"><input type="checkbox" name="show_birthday" {% if user.show_birthday %}checked{% endif %}>
+                        <span><strong>Show my birthday to friends</strong><small>Your birthday stays private unless you turn this on.</small></span>
                     </label>
                     <div class="settings-field settings-not-available">
                         <span><strong>Group invitations</strong><small>Group chats aren’t available in CHATTI yet, so there are no group invitations to control.</small></span>

@@ -19,7 +19,19 @@
                 <textarea name="content" maxlength="3000" placeholder="Share an idea…" aria-label="Write a post"></textarea>
             </div>
             <div class="feed-composer-bottom">
-                <label class="feed-media-label"><span>＋</span> Add photo or video<input type="file" name="media_file" accept="image/png,image/jpeg,image/gif,image/webp,video/mp4,video/webm"></label>
+                <label class="feed-audience-select">Who can see this post?
+                    <select name="audience" data-audience-select>
+                        <option value="public">Public</option><option value="friends" selected>Friends</option>
+                        <option value="private">Only me</option><option value="selected">Selected people</option>
+                    </select>
+                </label>
+                <label class="feed-selected-users" hidden>Choose friends
+                    <select name="selected_user_ids" multiple size="3" aria-label="Choose friends who can see this post">
+                        {% for person in feed_friends %}<option value="{{ person.id }}">{{ person.username }}</option>{% endfor %}
+                    </select>
+                </label>
+                <label class="feed-media-label"><span>＋</span> Add photos or videos<input type="file" name="media_file" multiple accept="image/png,image/jpeg,image/gif,image/webp,video/mp4,video/webm"></label>
+                <small class="feed-media-limit">Add up to 9 files. Images keep their original quality.</small>
                 <span class="feed-post-persistence">Your post stays here until you delete it.</span>
                 <button type="submit">Share post</button>
             </div>
@@ -31,16 +43,53 @@
         {% for item in feed_items %}{% set post = item.post %}{% set author = item.author %}
         <article class="feed-post" id="post-{{ post.id }}">
             <header class="feed-post-header"><a class="feed-author" href="/profile/{{ author.id }}"><span class="feed-avatar">{% if can_view_profile_picture(author) %}<img src="/avatar/{{ author.id }}" alt="">{% else %}{{ author.username[0].upper() }}{% endif %}</span><span><strong>{{ author.username }}</strong><time>{{ post.created_at.strftime('%b %d · %H:%M') }} UTC</time></span></a>{% if author.id == current_user.id %}<form method="POST" action="/posts/{{ post.id }}/delete" onsubmit="return confirm('Delete this post?')"><button class="feed-delete" type="submit" aria-label="Delete post">•••</button></form>{% endif %}</header>
+            <div class="feed-audience-row"><span aria-label="Post audience">{% if item.audience == 'public' %}🌐 Public{% elif item.audience == 'private' %}🔒 Only me{% elif item.audience == 'selected' %}👥 Selected people{% else %}♧ Friends{% endif %}</span></div>
+            {% if author.id == current_user.id %}<details class="feed-audience-edit"><summary>Edit audience</summary><form method="POST" action="/posts/{{ post.id }}/audience" class="feed-audience-form">
+                <label>Who can see this post?<select name="audience" data-audience-select>
+                    <option value="public" {% if item.audience == 'public' %}selected{% endif %}>Public</option>
+                    <option value="friends" {% if item.audience == 'friends' %}selected{% endif %}>Friends</option>
+                    <option value="private" {% if item.audience == 'private' %}selected{% endif %}>Only me</option>
+                    <option value="selected" {% if item.audience == 'selected' %}selected{% endif %}>Selected people</option>
+                </select></label>
+                <label class="feed-selected-users" {% if item.audience != 'selected' %}hidden{% endif %}>Choose friends<select name="selected_user_ids" multiple size="3" aria-label="Choose friends who can see this post">
+                    {% for person in feed_friends %}<option value="{{ person.id }}" {% if person.id in item.selected_user_ids %}selected{% endif %}>{{ person.username }}</option>{% endfor %}
+                </select></label><button type="submit">Save audience</button></form></details>{% endif %}
             {% if post.content %}<p class="feed-post-content">{{ post.content }}</p>{% endif %}
-            {% if post.media_url %}{% if post.media_type == 'image' %}<img class="feed-post-media" src="{{ post.media_url }}" alt="Photo shared by {{ author.username }}">{% elif post.media_type == 'video' %}<video class="feed-post-media" src="{{ post.media_url }}" controls playsinline></video>{% endif %}{% endif %}
-            <div class="feed-post-stats"><span>❤️ {{ item.reaction_counts.love }}　👍 {{ item.reaction_counts.like }}　😂 {{ item.reaction_counts.laugh }}</span><span>{{ item.comments|length }} comments</span></div>
-            <div class="feed-post-actions">{% for reaction, label, emoji in [('like','Like','👍'),('love','Love','❤️'),('laugh','Laugh','😂')] %}<form method="POST" action="/posts/{{ post.id }}/react"><input type="hidden" name="reaction" value="{{ reaction }}"><button class="feed-reaction{% if item.my_reaction == reaction %} active{% endif %}" type="submit">{{ emoji }} {{ label }}</button></form>{% endfor %}</div>
+            {% if item.media_items %}<div class="feed-post-media-grid{% if item.media_items|length == 1 %} is-single{% endif %}" data-media-count="{{ item.media_items|length }}">
+                {% for media in item.media_items %}{% if media.media_type == 'image' %}
+                <button type="button" class="feed-post-media-item" data-feed-image data-full-src="{{ media.src }}" data-image-alt="{{ media.alt }}" aria-label="Open image {{ loop.index }} of {{ item.media_items|length }}">
+                    <img src="{{ media.src }}" alt="{{ media.alt }}" loading="lazy">
+                </button>
+                {% elif media.media_type == 'video' %}<div class="feed-post-media-item"><video src="{{ media.src }}" controls playsinline preload="metadata"></video></div>{% endif %}{% endfor %}
+            </div>{% endif %}
+            <div class="feed-post-stats"><span class="feed-reaction-total" aria-live="polite"><strong data-reaction-total>{{ item.reaction_total }}</strong> <span>reactions</span></span><span>{{ item.comments|length }} comments</span></div>
+            <div class="feed-reaction-breakdown" data-reaction-breakdown aria-label="Post reactions">
+                {% for reaction, label, emoji in feed_reaction_options if item.reaction_counts[reaction] %}
+                <details class="feed-reaction-detail"><summary aria-label="{{ item.reaction_counts[reaction] }} {{ label }} reactions">{{ emoji }} <span>{{ item.reaction_counts[reaction] }}</span></summary><div>{% for username in item.reaction_people[reaction] %}<span>{{ username }}</span>{% endfor %}</div></details>
+                {% endfor %}
+            </div>
+            <div class="feed-post-actions">
+                <div class="feed-reaction-control">
+                    <button type="button" class="feed-reaction-trigger{% if item.my_reaction %} active{% endif %}" aria-expanded="false" aria-haspopup="true" data-reaction-trigger>
+                        <span data-current-reaction>{% if item.my_reaction %}{% for reaction, label, emoji in feed_reaction_options if reaction == item.my_reaction %}{{ emoji }} {{ label }}{% endfor %}{% else %}☺ React{% endif %}</span>
+                    </button>
+                    <div class="feed-reaction-picker" data-reaction-picker hidden role="group" aria-label="Choose a reaction">
+                        {% for reaction, label, emoji in feed_reaction_options %}<button type="button" class="feed-reaction-option{% if item.my_reaction == reaction %} active{% endif %}" data-reaction="{{ reaction }}" aria-label="{{ label }}" title="{{ label }}">{{ emoji }}<span>{{ label }}</span></button>{% endfor %}
+                    </div>
+                </div>
+            </div>
             <div class="feed-comments">{% for comment, commenter in item.comments %}<p><strong>{{ commenter.username }}</strong> {{ comment.content }}</p>{% endfor %}</div>
             <form class="feed-comment-form" method="POST" action="/posts/{{ post.id }}/comment"><input name="content" maxlength="1000" placeholder="Write a comment…" aria-label="Write a comment" required><button type="submit">Comment</button></form>
         </article>
         {% else %}<div class="feed-empty"><span>🌱</span><h2>Your feed starts here</h2><p>Share an idea, dream, or discussion to start a conversation.</p><a href="#create-post-title">Create your first post</a></div>{% endfor %}
     </section>
 </main>
+<div class="feed-image-viewer" id="feed-image-viewer" role="dialog" aria-modal="true" aria-label="Post image viewer" hidden>
+    <button type="button" class="feed-image-viewer-close" id="feed-image-viewer-close" aria-label="Close image viewer">×</button>
+    <button type="button" class="feed-image-viewer-nav previous" id="feed-image-viewer-previous" aria-label="Previous image">‹</button>
+    <figure><img id="feed-image-viewer-image" alt=""><figcaption id="feed-image-viewer-caption"></figcaption></figure>
+    <button type="button" class="feed-image-viewer-nav next" id="feed-image-viewer-next" aria-label="Next image">›</button>
+</div>
 {% endblock %}
 {% block scripts %}
 <script>
@@ -51,8 +100,123 @@ document.getElementById("create-post-button").addEventListener("click", () => {
     composer.classList.add("is-open");
     composer.querySelector("textarea").focus();
 });
+document.querySelectorAll("[data-audience-select]").forEach((select) => {
+    const updateAudienceFields = () => {
+        const selected = select.closest("form")?.querySelector(".feed-selected-users");
+        if (selected) selected.hidden = select.value !== "selected";
+    };
+    select.addEventListener("change", updateAudienceFields);
+    updateAudienceFields();
+});
+
+const feedImageViewer = document.getElementById("feed-image-viewer");
+const feedViewerImage = document.getElementById("feed-image-viewer-image");
+const feedViewerCaption = document.getElementById("feed-image-viewer-caption");
+let feedViewerImages = [];
+let feedViewerIndex = -1;
+let feedViewerReturnFocus = null;
+function renderFeedViewerImage() {
+    const image = feedViewerImages[feedViewerIndex];
+    if (!image) return;
+    feedViewerImage.src = image.dataset.fullSrc;
+    feedViewerImage.alt = image.dataset.imageAlt || "Post image";
+    feedViewerCaption.textContent = `${feedViewerIndex + 1} of ${feedViewerImages.length}`;
+    document.getElementById("feed-image-viewer-previous").hidden = feedViewerImages.length < 2;
+    document.getElementById("feed-image-viewer-next").hidden = feedViewerImages.length < 2;
+}
+function closeFeedViewer() {
+    feedImageViewer.hidden = true;
+    feedViewerImage.removeAttribute("src");
+    feedViewerImages = [];
+    feedViewerIndex = -1;
+    feedViewerReturnFocus?.focus();
+}
+document.querySelectorAll("[data-feed-image]").forEach((button) => button.addEventListener("click", () => {
+    feedViewerImages = [...button.closest(".feed-post-media-grid").querySelectorAll("[data-feed-image]")];
+    feedViewerIndex = feedViewerImages.indexOf(button);
+    feedViewerReturnFocus = button;
+    renderFeedViewerImage();
+    feedImageViewer.hidden = false;
+    document.getElementById("feed-image-viewer-close").focus();
+}));
+document.getElementById("feed-image-viewer-close").addEventListener("click", closeFeedViewer);
+document.getElementById("feed-image-viewer-previous").addEventListener("click", () => {
+    feedViewerIndex = (feedViewerIndex - 1 + feedViewerImages.length) % feedViewerImages.length;
+    renderFeedViewerImage();
+});
+document.getElementById("feed-image-viewer-next").addEventListener("click", () => {
+    feedViewerIndex = (feedViewerIndex + 1) % feedViewerImages.length;
+    renderFeedViewerImage();
+});
+feedImageViewer.addEventListener("click", (event) => { if (event.target === feedImageViewer) closeFeedViewer(); });
+document.addEventListener("keydown", (event) => {
+    if (feedImageViewer.hidden) return;
+    if (event.key === "Escape") closeFeedViewer();
+    else if (event.key === "ArrowLeft" && feedViewerImages.length > 1) document.getElementById("feed-image-viewer-previous").click();
+    else if (event.key === "ArrowRight" && feedViewerImages.length > 1) document.getElementById("feed-image-viewer-next").click();
+});
 document.querySelector("#feed-composer textarea").addEventListener("focus", () => {
     document.getElementById("feed-composer").classList.add("is-open");
+});
+
+const feedReactionOptions = {{ feed_reaction_options|tojson }};
+function renderPostReactionSummary(post, result) {
+    post.querySelector("[data-reaction-total]").textContent = result.reaction_total;
+    const breakdown = post.querySelector("[data-reaction-breakdown]");
+    breakdown.replaceChildren();
+    feedReactionOptions.forEach(([key, label, emoji]) => {
+        const count = result.reaction_counts[key] || 0;
+        if (!count) return;
+        const details = document.createElement("details"); details.className = "feed-reaction-detail";
+        const summary = document.createElement("summary"); summary.setAttribute("aria-label", `${count} ${label} reactions`);
+        summary.textContent = `${emoji} ${count}`; details.appendChild(summary);
+        const names = document.createElement("div");
+        (result.reaction_people[key] || []).forEach((username) => {
+            const name = document.createElement("span"); name.textContent = username; names.appendChild(name);
+        });
+        details.appendChild(names); breakdown.appendChild(details);
+    });
+}
+
+document.querySelectorAll("[data-reaction-trigger]").forEach((trigger) => {
+    const post = trigger.closest(".feed-post");
+    const picker = post.querySelector("[data-reaction-picker]");
+    trigger.addEventListener("click", () => {
+        const open = picker.hidden;
+        document.querySelectorAll("[data-reaction-picker]").forEach((other) => { other.hidden = true; other.closest(".feed-post").querySelector("[data-reaction-trigger]").setAttribute("aria-expanded", "false"); });
+        picker.hidden = !open; trigger.setAttribute("aria-expanded", String(open));
+    });
+    picker.addEventListener("click", async (event) => {
+        const choice = event.target.closest("[data-reaction]"); if (!choice) return;
+        choice.disabled = true;
+        try {
+            const response = await fetch(`/posts/${post.id.replace("post-", "")}/react`, {
+                method: "POST", headers: {"Content-Type": "application/json"},
+                body: JSON.stringify({reaction: choice.dataset.reaction})
+            });
+            const result = await response.json();
+            if (!response.ok) { window.alert(result.error || "Your reaction could not be saved."); return; }
+            const selected = feedReactionOptions.find(([key]) => key === result.my_reaction);
+            post.querySelector("[data-current-reaction]").textContent = selected ? `${selected[2]} ${selected[1]}` : "☺ React";
+            trigger.classList.toggle("active", Boolean(result.my_reaction));
+            picker.querySelectorAll("[data-reaction]").forEach((button) => button.classList.toggle("active", button.dataset.reaction === result.my_reaction));
+            renderPostReactionSummary(post, result);
+            picker.hidden = true; trigger.setAttribute("aria-expanded", "false");
+        } catch (_) { window.alert("Your reaction could not be saved. Check your connection and try again."); }
+        finally { choice.disabled = false; }
+    });
+});
+document.addEventListener("click", (event) => {
+    if (event.target.closest(".feed-reaction-control")) return;
+    document.querySelectorAll("[data-reaction-picker]:not([hidden])").forEach((picker) => {
+        picker.hidden = true; picker.closest(".feed-post").querySelector("[data-reaction-trigger]").setAttribute("aria-expanded", "false");
+    });
+});
+document.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape") return;
+    document.querySelectorAll("[data-reaction-picker]:not([hidden])").forEach((picker) => {
+        picker.hidden = true; picker.closest(".feed-post").querySelector("[data-reaction-trigger]").setAttribute("aria-expanded", "false");
+    });
 });
 </script>
 {% endblock %}

@@ -18,14 +18,19 @@
                 name="username" 
                 placeholder="Username" 
                 autocomplete="username"
+                minlength="3"
+                maxlength="50"
+                pattern="[A-Za-z0-9_.]{3,50}"
                 required
             >
+            <small>Choose a unique username using letters, numbers, dots, or underscores.</small>
 
             <input
                 type="email"
                 name="email"
                 placeholder="Email address"
                 autocomplete="email"
+                maxlength="254"
                 required
             >
 

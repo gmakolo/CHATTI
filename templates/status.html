@@ -27,9 +27,32 @@
                        accept="image/png,image/jpeg,image/gif,image/webp,video/mp4,video/webm,audio/mpeg,audio/mp4,audio/ogg,audio/wav,audio/x-wav,audio/webm" hidden>
             </div>
             <div class="status-compose-preview" id="status-media-preview" hidden></div>
+            <label class="status-audience-field" for="status-audience">Who can see this update?
+                <select name="audience" id="status-audience">
+                    <option value="everyone">Everyone</option>
+                    <option value="friends" selected>Friends only</option>
+                    <option value="selected">Selected people</option>
+                </select>
+            </label>
+            <label class="status-audience-selected" id="status-audience-selected" hidden>Choose friends
+                <select name="selected_user_ids" multiple size="3" aria-label="Choose friends who can see this update">
+                    {% for person in feed_friends %}<option value="{{ person.id }}">{{ person.username }}</option>{% endfor %}
+                </select>
+            </label>
             <label class="status-caption-label" for="status-content">Caption</label>
             <textarea id="status-content" name="content" maxlength="500" rows="3"
                       placeholder="What are you feeling?"></textarea>
+            <details class="status-poll-compose" id="status-poll-compose">
+                <summary>＋ Create a poll</summary>
+                <label for="status-poll-question">Poll question</label>
+                <input id="status-poll-question" name="poll_question" maxlength="200" placeholder="Ask your friends..." disabled>
+                <div class="status-poll-options" id="status-poll-options">
+                    <div class="status-poll-option-input"><input name="poll_option" maxlength="100" placeholder="Option 1" aria-label="Poll option 1" disabled></div>
+                    <div class="status-poll-option-input"><input name="poll_option" maxlength="100" placeholder="Option 2" aria-label="Poll option 2" disabled></div>
+                </div>
+                <button type="button" id="status-poll-add-option" class="status-poll-add-option" disabled>＋ Add option</button>
+                <small>Use 2 to 6 different options. Each friend can vote once.</small>
+            </details>
             <div class="status-text-style-controls" aria-label="Text update style">
                 <label>Background <select name="background" id="status-background">
                     <option value="forest">Midnight blue</option><option value="ocean">Dark navy</option><option value="sunset">Royal blue</option><option value="rose">Dark pink</option><option value="violet">Soft pink</option><option value="gold">Royal blue</option>
@@ -49,7 +72,7 @@
                 </div>
             </div>
             <div class="status-composer-footer">
-                <span>Visible to your friends</span>
+                <span>Choose an audience before sharing.</span>
                 <div class="status-compose-actions">
                     <button type="button" class="status-cancel-button" id="cancel-status-button">Cancel</button>
                     <button type="submit">Share update</button>
@@ -108,6 +131,7 @@
             <p id="updates-viewer-content" class="updates-viewer-content"></p>
         </div>
         <div class="updates-viewer-interactions" id="updates-viewer-interactions">
+            <section class="updates-poll" id="updates-poll" aria-label="Update poll" hidden></section>
             <div class="updates-reactions" aria-label="React to update">
                 {% for reaction in ['❤️', '😂', '😮', '😢', '👏', '🔥'] %}<button type="button" class="updates-reaction" data-reaction="{{ reaction }}" aria-label="React {{ reaction }}">{{ reaction }}</button>{% endfor %}
             </div>
@@ -133,9 +157,54 @@ const statusComposer = document.getElementById("status-composer");
 const addStatusButton = document.getElementById("add-status-button");
 const statusMediaPreview = document.getElementById("status-media-preview");
 const statusMediaInput = document.getElementById("status-media-input");
+const statusPollCompose = document.getElementById("status-poll-compose");
+const statusPollQuestion = document.getElementById("status-poll-question");
+const statusPollOptions = document.getElementById("status-poll-options");
+const statusPollAddOption = document.getElementById("status-poll-add-option");
+const statusAudienceSelect = document.getElementById("status-audience");
+const statusSelectedFriends = document.getElementById("status-audience-selected");
 let statusPreviewUrls = [];
 let lastStatusCursorStart = 0;
 let lastStatusCursorEnd = 0;
+function syncStatusAudience() {
+    statusSelectedFriends.hidden = statusAudienceSelect.value !== "selected";
+}
+statusAudienceSelect.addEventListener("change", syncStatusAudience);
+syncStatusAudience();
+
+function syncStatusPollFields() {
+    const enabled = statusPollCompose.open;
+    statusPollQuestion.disabled = !enabled;
+    statusPollQuestion.required = enabled;
+    statusPollOptions.querySelectorAll("input").forEach((input) => {
+        input.disabled = !enabled;
+        input.required = enabled;
+    });
+    statusPollAddOption.disabled = !enabled || statusPollOptions.querySelectorAll("input").length >= 6;
+}
+statusPollCompose.addEventListener("toggle", syncStatusPollFields);
+syncStatusPollFields();
+statusPollAddOption.addEventListener("click", () => {
+    const count = statusPollOptions.querySelectorAll("input").length;
+    if (count >= 6) return;
+    const row = document.createElement("div");
+    row.className = "status-poll-option-input";
+    const input = document.createElement("input");
+    input.name = "poll_option";
+    input.maxLength = 100;
+    input.placeholder = `Option ${count + 1}`;
+    input.setAttribute("aria-label", `Poll option ${count + 1}`);
+    input.required = true;
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.textContent = "×";
+    remove.setAttribute("aria-label", `Remove option ${count + 1}`);
+    remove.addEventListener("click", () => { row.remove(); syncStatusPollFields(); });
+    row.append(input, remove);
+    statusPollOptions.appendChild(row);
+    syncStatusPollFields();
+    input.focus();
+});
 
 function rememberStatusCursor() {
     lastStatusCursorStart = statusTextarea.selectionStart;
@@ -162,6 +231,7 @@ const viewerAvatar = document.getElementById("updates-viewer-avatar");
 const viewerReplyForm = document.getElementById("updates-reply-form");
 const viewerReplyInput = document.getElementById("updates-reply-input");
 const viewerReactionCounts = document.getElementById("updates-reaction-counts");
+const viewerPoll = document.getElementById("updates-poll");
 let activeStoryIndex = -1;
 let lastFocusedStory = null;
 
@@ -185,6 +255,81 @@ function renderReactionCounts(counts, mine) {
         item.textContent = `${reaction} ${count}`;
         viewerReactionCounts.appendChild(item);
     });
+}
+
+function renderStatusPoll(poll, authorId) {
+    viewerPoll.replaceChildren();
+    viewerPoll.hidden = !poll;
+    if (!poll) return;
+    const title = document.createElement("h3");
+    title.textContent = poll.question;
+    viewerPoll.appendChild(title);
+    const form = document.createElement("form");
+    form.className = "updates-poll-form";
+    const results = poll.results_visible || Number(authorId) === Number(CURRENT_USER_ID);
+    poll.options.forEach((option) => {
+        const row = document.createElement("label");
+        row.className = "updates-poll-option";
+        if (results) {
+            const bar = document.createElement("span");
+            bar.className = "updates-poll-bar";
+            bar.style.width = `${option.percent || 0}%`;
+            row.appendChild(bar);
+        } else {
+            const input = document.createElement("input");
+            input.type = "radio";
+            input.name = "poll-option";
+            input.value = option.id;
+            input.required = true;
+            row.appendChild(input);
+        }
+        const label = document.createElement("span");
+        label.className = "updates-poll-label";
+        label.textContent = option.label;
+        row.appendChild(label);
+        if (results) {
+            const count = document.createElement("span");
+            count.className = "updates-poll-count";
+            count.textContent = `${option.percent || 0}% · ${option.votes || 0}`;
+            row.appendChild(count);
+        }
+        form.appendChild(row);
+    });
+    if (!results && Number(authorId) !== Number(CURRENT_USER_ID)) {
+        const vote = document.createElement("button");
+        vote.type = "submit";
+        vote.textContent = "Vote";
+        form.appendChild(vote);
+        const error = document.createElement("p");
+        error.className = "updates-poll-error";
+        error.hidden = true;
+        form.appendChild(error);
+        form.addEventListener("submit", async (event) => {
+            event.preventDefault();
+            const selected = form.querySelector('input[name="poll-option"]:checked');
+            if (!selected) return;
+            vote.disabled = true;
+            try {
+                const response = await fetch(`/status/${viewerStories[activeStoryIndex].id}/poll/vote`, {
+                    method: "POST", headers: {"Content-Type": "application/json"},
+                    body: JSON.stringify({option_id: Number(selected.value)})
+                });
+                const data = await response.json();
+                if (!response.ok || !data.ok) throw new Error(data.error || "Vote could not be saved");
+                viewerStories[activeStoryIndex].poll = data.poll;
+                renderStatusPoll(data.poll, authorId);
+            } catch (failure) {
+                vote.disabled = false;
+                error.textContent = failure.message;
+                error.hidden = false;
+            }
+        });
+    } else {
+        const total = document.createElement("small");
+        total.textContent = `${poll.total_votes || 0} vote${poll.total_votes === 1 ? "" : "s"}`;
+        form.appendChild(total);
+    }
+    viewerPoll.appendChild(form);
 }
 
 function updateExpiry(story) {
@@ -216,6 +361,7 @@ async function renderStory(index) {
     viewerDeleteForm.hidden = !story.delete_url;
     if (story.delete_url) viewerDeleteForm.action = story.delete_url;
     viewerReplyForm.hidden = story.user_id === Number(CURRENT_USER_ID);
+    renderStatusPoll(story.poll, story.user_id);
     viewerMedia.replaceChildren();
     if (story.media_url) {
         const kind = story.media_type;

@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block content %}
+<main class="auth-page">
+    <section class="auth-card" aria-labelledby="complete-account-title">
+        <p class="login-eyebrow">EXISTING ACCOUNT</p>
+        <h1 id="complete-account-title">Add your email address</h1>
+        <p>Use your existing username and password once to attach an email. Your messages and friends stay with the same account.</p>
+        <form method="POST" class="legacy-account-form">
+            <label for="legacy-username">Existing username</label>
+            <input id="legacy-username" name="username" autocomplete="username" required>
+            <label for="legacy-password">Existing password</label>
+            <div class="password-input-row">
+                <input id="legacy-password" type="password" name="password" autocomplete="current-password" required data-password-limit>
+                <label class="show-password"><input type="checkbox" data-password-toggle="legacy-password"> Show</label>
+            </div>
+            <label for="legacy-email">New unique email address</label>
+            <input id="legacy-email" type="email" name="email" maxlength="254" autocomplete="email" required>
+            <button type="submit">Save email</button>
+        </form>
+        <p><a href="/login">Back to email login</a></p>
+    </section>
+</main>
+{% endblock %}

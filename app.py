@@ -1,6 +1,8 @@
 from flask_socketio import SocketIO, emit, join_room
 from email.message import EmailMessage
 import os
+import hashlib
+import shutil
 import socket
 import smtplib
 import ssl
@@ -13,6 +15,7 @@ from flask import (
 )
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import func, inspect, text, update
+from sqlalchemy.exc import IntegrityError
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 from werkzeug.security import generate_password_hash, check_password_hash
 
@@ -37,16 +40,18 @@ MAX_PROFILE_IMAGE_BYTES = 3 * 1024 * 1024
 MAX_STATUS_MEDIA_BYTES = 25 * 1024 * 1024
 RESET_TOKEN_MAX_AGE = 60 * 60
 CHAT_THEMES = {
-    "forest": {"label": "Violet and lavender", "bg": "#FFFFFF", "sent": "#7C3AED", "received": "#EDE9FE", "accent": "#7C3AED"},
-    "mint": {"label": "Lavender mist", "bg": "#F5F3FF", "sent": "#7C3AED", "received": "#EDE9FE", "accent": "#7C3AED"},
-    "ocean": {"label": "Electric violet", "bg": "#FFFFFF", "sent": "#7C3AED", "received": "#EDE9FE", "accent": "#7C3AED"},
-    "sky": {"label": "Soft lavender", "bg": "#FFFFFF", "sent": "#7C3AED", "received": "#EDE9FE", "accent": "#7C3AED"},
-    "lavender": {"label": "Lavender light", "bg": "#F5F3FF", "sent": "#7C3AED", "received": "#FFFFFF", "accent": "#7C3AED"},
-    "rose": {"label": "Dusty mauve", "bg": "#FFFFFF", "sent": "#7C3AED", "received": "#EDE9FE", "accent": "#8B5E83"},
-    "peach": {"label": "Bright white", "bg": "#FFFFFF", "sent": "#7C3AED", "received": "#EDE9FE", "accent": "#7C3AED"},
-    "sunshine": {"label": "Soft violet", "bg": "#F5F3FF", "sent": "#7C3AED", "received": "#EDE9FE", "accent": "#7C3AED"},
-    "plum": {"label": "Violet mist", "bg": "#FFFFFF", "sent": "#7C3AED", "received": "#EDE9FE", "accent": "#7C3AED"},
-    "midnight": {"label": "Midnight violet", "bg": "#FFFFFF", "sent": "#7C3AED", "received": "#EDE9FE", "accent": "#7C3AED"},
+    # Each theme has separate light and dark colors so the global appearance
+    # preference does not flatten the user's per-conversation color choice.
+    "forest": {"label": "Violet and Lavender", "bg": "#FAF7FF", "sent": "#7C3AED", "received": "#EDE9FE", "accent": "#7C3AED", "dark_bg": "#211936", "dark_sent": "#7C3AED", "dark_received": "#382751", "dark_accent": "#A78BFA"},
+    "mint": {"label": "Lavender Mist", "bg": "#F6F0FF", "sent": "#6D28D9", "received": "#E9D5FF", "accent": "#7C3AED", "dark_bg": "#211936", "dark_sent": "#8B5CF6", "dark_received": "#382751", "dark_accent": "#A78BFA"},
+    "ocean": {"label": "Electric Violet", "bg": "#FFFFFF", "sent": "#7C3AED", "received": "#DDD6FE", "accent": "#6D28D9", "dark_bg": "#0F0B1A", "dark_sent": "#7C3AED", "dark_received": "#2D2143", "dark_accent": "#A78BFA"},
+    "sky": {"label": "Soft Lavender", "bg": "#F5F3FF", "sent": "#8B5CF6", "received": "#DDD6FE", "accent": "#7C3AED", "dark_bg": "#211936", "dark_sent": "#8B5CF6", "dark_received": "#3A2C53", "dark_accent": "#A78BFA"},
+    "lavender": {"label": "Lavender Light", "bg": "#FCFBFF", "sent": "#A855F7", "received": "#F3E8FF", "accent": "#9333EA", "dark_bg": "#211936", "dark_sent": "#A855F7", "dark_received": "#39264F", "dark_accent": "#C084FC"},
+    "rose": {"label": "Dusty Mauve", "bg": "#FBF7FA", "sent": "#8B5E83", "received": "#EFE3EC", "accent": "#8B5E83", "dark_bg": "#211936", "dark_sent": "#A8799F", "dark_received": "#3B293A", "dark_accent": "#C4A0BD"},
+    "peach": {"label": "Bright White", "bg": "#FFFFFF", "sent": "#7C3AED", "received": "#F1F5F9", "accent": "#7C3AED", "dark_bg": "#1A1428", "dark_sent": "#7C3AED", "dark_received": "#2B2340", "dark_accent": "#A78BFA"},
+    "sunshine": {"label": "Midnight Violet", "bg": "#F1EDFF", "sent": "#5B21B6", "received": "#DDD6FE", "accent": "#6D28D9", "dark_bg": "#0F0B1A", "dark_sent": "#6D28D9", "dark_received": "#2B1E42", "dark_accent": "#A78BFA"},
+    "plum": {"label": "Rose Lavender", "bg": "#FFF7FC", "sent": "#9333EA", "received": "#FCE7F3", "accent": "#7C3AED", "dark_bg": "#211936", "dark_sent": "#A855F7", "dark_received": "#40263F", "dark_accent": "#D8B4FE"},
+    "midnight": {"label": "Deep Purple", "bg": "#F5F0FF", "sent": "#5B21B6", "received": "#EDE9FE", "accent": "#6D28D9", "dark_bg": "#0F0B1A", "dark_sent": "#6D28D9", "dark_received": "#2D2143", "dark_accent": "#A78BFA"},
 }
 STICKER_SEEDS = [
     ("Big laugh", "happy funny laugh lol", "😂", "Reactions"),
@@ -136,8 +141,11 @@ class User(db.Model):
     full_name = db.Column(db.String(100), nullable=True)
     bio = db.Column(db.String(120), nullable=True)
     birthday = db.Column(db.Date, nullable=True)
+    show_birthday = db.Column(db.Boolean, nullable=True, default=False)
     gender = db.Column(db.String(40), nullable=True)
     location = db.Column(db.String(120), nullable=True)
+    interests = db.Column(db.String(300), nullable=True)
+    occupation = db.Column(db.String(100), nullable=True)
     message_retention = db.Column(db.String(20), nullable=True, default="off")
     last_active_at = db.Column(db.DateTime, nullable=True)
     show_online_status = db.Column(db.Boolean, nullable=True, default=True)
@@ -147,7 +155,7 @@ class User(db.Model):
     avatar_visibility = db.Column(db.String(20), nullable=True, default="everyone")
     notifications_enabled = db.Column(db.Boolean, nullable=True, default=True)
     default_chat_theme = db.Column(db.String(20), nullable=True, default="forest")
-    appearance_mode = db.Column(db.String(10), nullable=True, default="light")
+    appearance_mode = db.Column(db.String(10), nullable=True, default="dark")
     created_at = db.Column(db.DateTime, default=utcnow)
 
 
@@ -239,7 +247,17 @@ class Status(db.Model):
     media_type = db.Column(db.String(10), nullable=True)
     background = db.Column(db.String(20), nullable=True, default="forest")
     text_style = db.Column(db.String(20), nullable=True, default="classic")
+    # Legacy NULL values remain friends-only, so the new audience feature does
+    # not accidentally expose older updates.
+    audience = db.Column(db.String(20), nullable=True, default="friends")
     timestamp = db.Column(db.DateTime, default=utcnow)
+
+
+class StatusAudience(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    status_id = db.Column(db.Integer, db.ForeignKey("status.id"), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    __table_args__ = (db.UniqueConstraint("status_id", "user_id", name="uq_status_audience_status_user"),)
 
 
 class StatusView(db.Model):
@@ -259,13 +277,54 @@ class StatusReaction(db.Model):
     __table_args__ = (db.UniqueConstraint("status_id", "user_id", name="uq_status_reaction_status_user"),)
 
 
+class StatusPoll(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    status_id = db.Column(db.Integer, db.ForeignKey("status.id"), nullable=False, unique=True)
+    question = db.Column(db.String(200), nullable=False)
+    created_at = db.Column(db.DateTime, default=utcnow)
+
+
+class StatusPollOption(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    poll_id = db.Column(db.Integer, db.ForeignKey("status_poll.id"), nullable=False)
+    label = db.Column(db.String(100), nullable=False)
+    position = db.Column(db.Integer, nullable=False, default=0)
+    __table_args__ = (db.UniqueConstraint("poll_id", "position", name="uq_status_poll_option_position"),)
+
+
+class StatusPollVote(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    poll_id = db.Column(db.Integer, db.ForeignKey("status_poll.id"), nullable=False)
+    option_id = db.Column(db.Integer, db.ForeignKey("status_poll_option.id"), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    created_at = db.Column(db.DateTime, default=utcnow)
+    __table_args__ = (db.UniqueConstraint("poll_id", "user_id", name="uq_status_poll_vote_user"),)
+
+
 class FeedPost(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
     content = db.Column(db.Text, nullable=False, default="")
     media_url = db.Column(db.String(255), nullable=True)
     media_type = db.Column(db.String(10), nullable=True)
+    # NULL on older rows is treated as friends-only to avoid exposing old posts.
+    audience = db.Column(db.String(20), nullable=True, default="friends")
     created_at = db.Column(db.DateTime, default=utcnow)
+
+
+class FeedPostAudience(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    post_id = db.Column(db.Integer, db.ForeignKey("feed_post.id"), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    __table_args__ = (db.UniqueConstraint("post_id", "user_id", name="uq_feed_post_audience_post_user"),)
+
+
+class PostMedia(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    post_id = db.Column(db.Integer, db.ForeignKey("feed_post.id"), nullable=False)
+    media_url = db.Column(db.String(255), nullable=False)
+    media_type = db.Column(db.String(10), nullable=False, default="image")
+    position = db.Column(db.Integer, nullable=False, default=0)
 
 
 class FeedComment(db.Model):
@@ -282,6 +341,7 @@ class FeedReaction(db.Model):
     user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
     reaction = db.Column(db.String(20), nullable=False, default="like")
     created_at = db.Column(db.DateTime, default=utcnow)
+    __table_args__ = (db.UniqueConstraint("post_id", "user_id", name="uq_feed_reaction_post_user"),)
 
 
 # ======================
@@ -324,6 +384,49 @@ def ensure_schema():
             )
             added.append(f"{table}.{column.name}")
 
+    # Older CHATTI databases predate the per-user reaction constraint. Keep
+    # the most recently selected reaction for each pair before adding the
+    # unique index, preserving the intended one-reaction-per-person behavior.
+    if "feed_reaction" in inspector.get_table_names():
+        duplicate_sets = db.session.query(
+            FeedReaction.post_id, FeedReaction.user_id, func.count(FeedReaction.id)
+        ).group_by(FeedReaction.post_id, FeedReaction.user_id).having(func.count(FeedReaction.id) > 1).all()
+        for post_id, user_id, _count in duplicate_sets:
+            rows = FeedReaction.query.filter_by(post_id=post_id, user_id=user_id).order_by(
+                FeedReaction.created_at.desc(), FeedReaction.id.desc()
+            ).all()
+            for duplicate in rows[1:]:
+                db.session.delete(duplicate)
+        db.session.flush()
+        db.session.execute(text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_feed_reaction_post_user "
+            "ON feed_reaction (post_id, user_id)"
+        ))
+
+    # Enforce case-insensitive uniqueness for new identities without deleting
+    # legacy accounts. If old data already contains conflicts, preserve it and
+    # let authentication reject ambiguous addresses while signup checks remain
+    # authoritative for new accounts.
+    if "user" in inspector.get_table_names():
+        duplicate_emails = db.session.execute(text(
+            "SELECT lower(email) FROM user WHERE email IS NOT NULL AND trim(email) <> '' "
+            "GROUP BY lower(email) HAVING COUNT(*) > 1 LIMIT 1"
+        )).first()
+        if not duplicate_emails:
+            db.session.execute(text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_user_email_casefold "
+                "ON user (lower(email)) WHERE email IS NOT NULL AND trim(email) <> ''"
+            ))
+        duplicate_usernames = db.session.execute(text(
+            "SELECT lower(username) FROM user WHERE username IS NOT NULL AND trim(username) <> '' "
+            "GROUP BY lower(username) HAVING COUNT(*) > 1 LIMIT 1"
+        )).first()
+        if not duplicate_usernames:
+            db.session.execute(text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_user_username_casefold "
+                "ON user (lower(username)) WHERE username IS NOT NULL AND trim(username) <> ''"
+            ))
+
     db.session.commit()
     return added
 
@@ -345,6 +448,38 @@ def are_friends(a, b):
          ((Friendship.user_id == b) & (Friendship.friend_id == a))) &
         (Friendship.status.is_(None) | (Friendship.status == "accepted"))
     ).first() is not None
+
+
+def can_view_feed_post(viewer_id, post):
+    """Enforce post audiences for every feed interaction and listing."""
+    if not viewer_id or not post or is_blocked(viewer_id, post.user_id):
+        return False
+    if viewer_id == post.user_id:
+        return True
+    audience = post.audience or "friends"  # safe default for legacy records
+    if audience == "public":
+        return True
+    if audience == "friends":
+        return are_friends(viewer_id, post.user_id)
+    if audience == "selected":
+        return FeedPostAudience.query.filter_by(post_id=post.id, user_id=viewer_id).first() is not None
+    return False
+
+
+def can_view_status(viewer_id, status):
+    """Apply a status audience consistently to feeds, media, and interactions."""
+    if not viewer_id or not status or is_blocked(viewer_id, status.user_id):
+        return False
+    if viewer_id == status.user_id:
+        return True
+    audience = status.audience or "friends"  # safe default for legacy updates
+    if audience == "everyone":
+        return True
+    if audience == "friends":
+        return are_friends(viewer_id, status.user_id)
+    if audience == "selected":
+        return StatusAudience.query.filter_by(status_id=status.id, user_id=viewer_id).first() is not None
+    return False
 
 
 PENDING_REQUEST_MESSAGE_LIMIT = 3
@@ -462,8 +597,29 @@ def current_notifications_enabled():
 def current_appearance_mode():
     viewer_id = session.get("user_id")
     current = db.session.get(User, viewer_id) if viewer_id else None
-    mode = current.appearance_mode if current else "light"
-    return mode if mode in {"light", "dark"} else "light"
+    mode = current.appearance_mode if current else "dark"
+    return mode if mode in {"light", "dark"} else "dark"
+
+
+@app.template_global()
+def static_asset_version(filename):
+    """Return a content-change-sensitive URL version for local static assets."""
+    safe_name = os.path.basename(filename or "")
+    asset_path = os.path.join(app.static_folder, safe_name)
+    try:
+        return os.stat(asset_path).st_mtime_ns
+    except OSError:
+        return 0
+
+
+@app.template_global()
+def current_unread_count():
+    uid = session.get("user_id")
+    if uid is None:
+        return 0
+    now = utcnow()
+    available = (Message.expires_at.is_(None) | (Message.expires_at > now))
+    return Message.query.filter_by(receiver_id=uid, read_at=None).filter(available).count()
 
 
 def room(a, b):
@@ -472,6 +628,35 @@ def room(a, b):
 
 def notify_inbox(recipient_id, payload):
     socketio.emit("inbox_message", payload, to=f"user_{recipient_id}")
+    emit_unread_count(recipient_id, payload.get("sender_id"))
+
+
+def unread_count_for(user_id, peer_id=None):
+    available = Message.expires_at.is_(None) | (Message.expires_at > utcnow())
+    query = Message.query.filter_by(receiver_id=user_id, read_at=None).filter(available)
+    if peer_id is not None:
+        query = query.filter_by(sender_id=peer_id)
+    return query.count()
+
+
+def emit_unread_count(user_id, peer_id=None):
+    socketio.emit("unread_count_update", {
+        "total": unread_count_for(user_id),
+        "peer_id": peer_id,
+        "conversation": unread_count_for(user_id, peer_id) if peer_id is not None else None,
+    }, to=f"user_{user_id}")
+
+
+def mark_message_delivery(message, recipient_id, recipient, room_name, now=None):
+    """Mark online messages delivered; mark messages read only in an open chat."""
+    now = now or utcnow()
+    viewing = bool(chat_room_viewers.get(room_name, {}).get(recipient_id))
+    if viewing or online_sessions.get(recipient_id):
+        message.delivered_at = message.delivered_at or now
+    if viewing:
+        message.read_at = message.read_at or now
+        message.read_receipt_hidden = recipient.show_read_receipts is False if recipient else False
+    return viewing
 
 
 def socket_user():
@@ -500,6 +685,28 @@ def valid_peer(data):
 
 def valid_email(value):
     return bool(value and len(value) <= 254 and re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", value))
+
+
+def valid_username(value):
+    return bool(value and re.fullmatch(r"[A-Za-z0-9_.]{3,50}", value))
+
+
+def username_taken(value, exclude_id=None):
+    query = User.query.filter(func.lower(User.username) == value.lower())
+    if exclude_id is not None:
+        query = query.filter(User.id != exclude_id)
+    return query.first() is not None
+
+
+@app.before_request
+def require_username_setup():
+    uid = session.get("user_id")
+    if uid is None or request.endpoint in {"username_setup", "logout", "static"}:
+        return None
+    user = db.session.get(User, uid)
+    if user and not (user.username or "").strip():
+        return redirect(url_for("username_setup"))
+    return None
 
 
 def valid_new_password(value):
@@ -566,22 +773,63 @@ def home():
     if "user_id" not in session:
         return redirect("/login")
     uid = session["user_id"]
-    visible_ids = get_friends(uid) + [uid]
-    posts = FeedPost.query.filter(FeedPost.user_id.in_(visible_ids)).order_by(FeedPost.created_at.desc()).all()
+    posts = [post for post in FeedPost.query.order_by(FeedPost.created_at.desc()).all()
+             if can_view_feed_post(uid, post)]
+    friend_ids = get_friends(uid)
+    feed_friends = User.query.filter(User.id.in_(friend_ids)).order_by(User.username).all() if friend_ids else []
     feed_items = []
+    feed_reaction_options = [
+        ("love", "Love", "❤️"), ("like", "Like", "👍"), ("funny", "Funny", "😂"),
+        ("wow", "Wow", "😮"), ("sad", "Sad", "😢"), ("angry", "Angry", "😡"),
+        ("fire", "Fire", "🔥"), ("applause", "Applause", "👏"), ("adore", "Adore", "🥰"),
+        ("purple_heart", "Purple Heart", "💜"), ("celebrate", "Celebrate", "🎉"),
+        ("thinking", "Thinking", "🤔"),
+    ]
     for post in posts:
         author = db.session.get(User, post.user_id)
+        attachment_rows = PostMedia.query.filter_by(post_id=post.id).order_by(PostMedia.position, PostMedia.id).all()
+        if attachment_rows:
+            media_items = [{
+                "id": media.id,
+                "src": url_for("feed_post_attachment", post_id=post.id, media_id=media.id),
+                "media_type": media.media_type,
+                "alt": f"Photo shared by {author.username}" if media.media_type == "image" else f"Video shared by {author.username}",
+            } for media in attachment_rows]
+        elif post.media_url:
+            media_items = [{
+                "id": None, "src": url_for("feed_post_media", post_id=post.id),
+                "media_type": post.media_type or "image",
+                "alt": f"Photo shared by {author.username}" if post.media_type == "image" else f"Video shared by {author.username}",
+            }]
+        else:
+            media_items = []
         comments = FeedComment.query.filter_by(post_id=post.id).order_by(FeedComment.created_at.asc()).all()
         comment_items = [(comment, db.session.get(User, comment.user_id)) for comment in comments]
         reactions = FeedReaction.query.filter_by(post_id=post.id).all()
+        reaction_counts = {key: 0 for key, _label, _emoji in feed_reaction_options}
+        reaction_people = {key: [] for key, _label, _emoji in feed_reaction_options}
+        for reaction in reactions:
+            key = "funny" if reaction.reaction == "laugh" else reaction.reaction
+            if key in reaction_counts:
+                reaction_counts[key] += 1
+                reactor = db.session.get(User, reaction.user_id)
+                if reactor:
+                    reaction_people[key].append(reactor.username)
+        mine = next((item.reaction for item in reactions if item.user_id == uid), None)
         feed_items.append({
             "post": post, "author": author, "comments": comment_items,
-            "reaction_counts": {key: sum(1 for item in reactions if item.reaction == key)
-                                for key in ("like", "love", "laugh")},
-            "my_reaction": next((item.reaction for item in reactions if item.user_id == uid), None),
+            "media_items": media_items,
+            "audience": post.audience or "friends",
+            "selected_user_ids": [row.user_id for row in FeedPostAudience.query.filter_by(post_id=post.id).all()],
+            "audience_label": {"public": "Public", "friends": "Friends", "private": "Only me", "selected": "Selected people"}.get(post.audience or "friends", "Friends"),
+            "reaction_counts": reaction_counts,
+            "reaction_people": reaction_people,
+            "reaction_total": sum(reaction_counts.values()),
+            "my_reaction": "funny" if mine == "laugh" else mine,
         })
     current_user = db.session.get(User, uid)
-    return render_template("home.html", feed_items=feed_items, current_user=current_user)
+    return render_template("home.html", feed_items=feed_items, current_user=current_user,
+                           feed_reaction_options=feed_reaction_options, feed_friends=feed_friends)
 
 
 @app.route("/conversations/search")
@@ -648,14 +896,17 @@ def save_social_media(file, folder):
         raise ValueError("Choose a photo or video smaller than 25 MB")
     if mime not in signatures or not signatures[mime](data):
         raise ValueError("Choose a JPG, PNG, GIF, WebP, MP4, or WebM file")
-    upload_dir = os.path.join(app.static_folder, "uploads", folder)
+    private_post_upload = folder == "posts"
+    upload_dir = (os.path.join(app.instance_path, "uploads", "posts") if private_post_upload
+                  else os.path.join(app.static_folder, "uploads", folder))
     os.makedirs(upload_dir, exist_ok=True)
     extension = {"image/png": "png", "image/jpeg": "jpg", "image/gif": "gif",
                  "image/webp": "webp", "video/mp4": "mp4", "video/webm": "webm"}[mime]
     filename = f"{uuid.uuid4().hex}.{extension}"
     with open(os.path.join(upload_dir, filename), "wb") as uploaded_file:
         uploaded_file.write(data)
-    return f"/static/uploads/{folder}/{filename}", mime.split("/", 1)[0]
+    stored_path = f"/private-uploads/posts/{filename}" if private_post_upload else f"/static/uploads/{folder}/{filename}"
+    return stored_path, mime.split("/", 1)[0]
 
 
 @app.route("/posts", methods=["POST"])
@@ -666,31 +917,166 @@ def create_feed_post():
     if len(content) > 3000:
         flash("Posts must be 3,000 characters or fewer", "error")
         return redirect("/")
+    uid = session["user_id"]
+    audience = request.form.get("audience", "friends")
+    if audience not in {"public", "friends", "private", "selected"}:
+        flash("Choose a valid audience for your post", "error")
+        return redirect("/")
+    selected_ids, selection_error = selected_feed_audience_ids(uid, request.form.getlist("selected_user_ids"))
+    if selection_error or (audience == "selected" and not selected_ids):
+        flash(selection_error or "Choose at least one friend for this post", "error")
+        return redirect("/")
+    media_files = [item for item in request.files.getlist("media_file") if item and item.filename]
+    if len(media_files) > 9:
+        flash("Choose up to 9 photos or videos per post", "error")
+        return redirect("/")
+    saved_media = []
     try:
-        media_url, media_type = save_social_media(request.files.get("media_file"), "posts")
+        for media_file in media_files:
+            saved_media.append(save_social_media(media_file, "posts"))
     except ValueError as error:
+        for media_url, _kind in saved_media:
+            remove_post_upload(media_url)
         flash(str(error), "error")
         return redirect("/")
-    if not content and not media_url:
+    if not content and not saved_media:
+        for media_url, _kind in saved_media:
+            remove_post_upload(media_url)
         flash("Write something or add a photo or video", "error")
         return redirect("/")
-    db.session.add(FeedPost(user_id=session["user_id"], content=content,
-                            media_url=media_url, media_type=media_type))
-    db.session.commit()
+    # Keep single-file posts in the legacy columns for compatibility. New
+    # multi-attachment posts use PostMedia rows, retaining original file bytes.
+    legacy_url, legacy_type = saved_media[0] if len(saved_media) == 1 else (None, None)
+    post = FeedPost(user_id=uid, content=content, media_url=legacy_url, media_type=legacy_type, audience=audience)
+    db.session.add(post)
+    db.session.flush()
+    db.session.add_all(FeedPostAudience(post_id=post.id, user_id=person_id) for person_id in selected_ids)
+    if len(saved_media) > 1:
+        db.session.add_all(
+            PostMedia(post_id=post.id, media_url=media_url, media_type=media_type, position=position)
+            for position, (media_url, media_type) in enumerate(saved_media)
+        )
+    try:
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        for media_url, _kind in saved_media:
+            remove_post_upload(media_url)
+        raise
     flash("Your post is on the feed", "success")
     return redirect("/")
+
+
+def post_upload_location(media_url):
+    """Resolve a stored post path only beneath CHATTI's approved upload roots."""
+    prefixes = {
+        "/private-uploads/posts/": os.path.join(app.instance_path, "uploads", "posts"),
+        "/static/uploads/posts/": os.path.join(app.static_folder, "uploads", "posts"),
+    }
+    prefix = next((value for value in prefixes if media_url and media_url.startswith(value)), None)
+    if not prefix:
+        return None
+    tail = media_url[len(prefix):]
+    filename = os.path.basename(tail)
+    if not filename or filename != tail:
+        return None
+    upload_dir = os.path.realpath(prefixes[prefix])
+    full_path = os.path.realpath(os.path.join(upload_dir, filename))
+    if os.path.commonpath((upload_dir, full_path)) != upload_dir:
+        return None
+    return upload_dir, filename
+
+
+def remove_post_upload(media_url):
+    location = post_upload_location(media_url)
+    if not location:
+        return
+    try:
+        os.remove(os.path.join(*location))
+    except FileNotFoundError:
+        pass
+    except OSError:
+        app.logger.warning("Could not remove post upload: %s", media_url)
+
+
+@app.route("/posts/<int:post_id>/media")
+def feed_post_media(post_id):
+    """Serve feed uploads only after checking the post's current audience."""
+    uid = session.get("user_id")
+    post = db.session.get(FeedPost, post_id)
+    if not can_view_feed_post(uid, post) or not post.media_url:
+        abort(404)
+    location = post_upload_location(post.media_url)
+    if not location:
+        abort(404)
+    return send_from_directory(*location)
+
+
+@app.route("/posts/<int:post_id>/media/<int:media_id>")
+def feed_post_attachment(post_id, media_id):
+    uid = session.get("user_id")
+    post = db.session.get(FeedPost, post_id)
+    media = PostMedia.query.filter_by(id=media_id, post_id=post_id).first()
+    location = post_upload_location(media.media_url) if media else None
+    if not can_view_feed_post(uid, post) or not location:
+        abort(404)
+    return send_from_directory(*location)
+
+
+def selected_feed_audience_ids(owner_id, raw_ids):
+    friend_ids = set(get_friends(owner_id))
+    selected = set()
+    for raw_id in raw_ids:
+        try:
+            person_id = int(raw_id)
+        except (TypeError, ValueError):
+            return [], "Choose valid friends for the selected audience"
+        if person_id not in friend_ids:
+            return [], "Only accepted friends can be selected for a post"
+        selected.add(person_id)
+    return sorted(selected), None
+
+
+@app.route("/posts/<int:post_id>/audience", methods=["POST"])
+def update_feed_post_audience(post_id):
+    if "user_id" not in session:
+        return redirect("/login")
+    uid = session["user_id"]
+    post = db.session.get(FeedPost, post_id)
+    if post is None or post.user_id != uid:
+        abort(404)
+    audience = request.form.get("audience", "friends")
+    if audience not in {"public", "friends", "private", "selected"}:
+        abort(400)
+    selected_ids, error = selected_feed_audience_ids(uid, request.form.getlist("selected_user_ids"))
+    if error or (audience == "selected" and not selected_ids):
+        flash(error or "Choose at least one friend for this post", "error")
+        return redirect("/#post-" + str(post_id))
+    FeedPostAudience.query.filter_by(post_id=post_id).delete(synchronize_session=False)
+    db.session.add_all(FeedPostAudience(post_id=post.id, user_id=person_id) for person_id in selected_ids)
+    post.audience = audience
+    db.session.commit()
+    flash("Post audience updated", "success")
+    return redirect("/#post-" + str(post_id))
 
 
 @app.route("/posts/<int:post_id>/react", methods=["POST"])
 def react_to_post(post_id):
     if "user_id" not in session:
-        return redirect("/login")
+        return (jsonify(ok=False, error="Please sign in to react"), 401) if request.is_json else redirect("/login")
     uid = session["user_id"]
     post = db.session.get(FeedPost, post_id)
-    if not post or (post.user_id != uid and not are_friends(uid, post.user_id)):
+    if not can_view_feed_post(uid, post):
+        if request.is_json:
+            return jsonify(ok=False, error="You cannot react to this post"), 404
         abort(404)
-    reaction = request.form.get("reaction", "like")
-    if reaction not in {"like", "love", "laugh"}:
+    options = {"like", "love", "funny", "wow", "sad", "angry", "fire", "applause", "adore", "purple_heart", "celebrate", "thinking"}
+    payload = request.get_json(silent=True) if request.is_json else None
+    reaction = (payload.get("reaction") if isinstance(payload, dict) else None) if request.is_json else request.form.get("reaction", "like")
+    reaction = "funny" if reaction == "laugh" else reaction
+    if reaction not in options:
+        if request.is_json:
+            return jsonify(ok=False, error="Choose one of the available reactions"), 400
         abort(400)
     existing = FeedReaction.query.filter_by(post_id=post_id, user_id=uid).first()
     if existing and existing.reaction == reaction:
@@ -699,7 +1085,36 @@ def react_to_post(post_id):
         existing.reaction = reaction
     else:
         db.session.add(FeedReaction(post_id=post_id, user_id=uid, reaction=reaction))
-    db.session.commit()
+    try:
+        db.session.commit()
+    except IntegrityError:
+        # A simultaneous first reaction may race between the lookup and insert.
+        # The unique key remains authoritative; reload and apply the user's choice.
+        db.session.rollback()
+        existing = FeedReaction.query.filter_by(post_id=post_id, user_id=uid).first()
+        if existing and existing.reaction == reaction:
+            db.session.delete(existing)
+        elif existing:
+            existing.reaction = reaction
+        else:
+            db.session.add(FeedReaction(post_id=post_id, user_id=uid, reaction=reaction))
+        db.session.commit()
+    if request.is_json:
+        rows = FeedReaction.query.filter_by(post_id=post_id).all()
+        reaction_counts = {key: 0 for key in options}
+        reaction_people = {key: [] for key in options}
+        mine = None
+        for row in rows:
+            key = "funny" if row.reaction == "laugh" else row.reaction
+            if key in reaction_counts:
+                reaction_counts[key] += 1
+                reactor = db.session.get(User, row.user_id)
+                if reactor:
+                    reaction_people[key].append(reactor.username)
+            if row.user_id == uid:
+                mine = key
+        return jsonify(ok=True, my_reaction=mine, reaction_counts=reaction_counts,
+                       reaction_people=reaction_people, reaction_total=sum(reaction_counts.values()))
     return redirect("/")
 
 
@@ -709,7 +1124,7 @@ def comment_on_post(post_id):
         return redirect("/login")
     uid = session["user_id"]
     post = db.session.get(FeedPost, post_id)
-    if not post or (post.user_id != uid and not are_friends(uid, post.user_id)):
+    if not can_view_feed_post(uid, post):
         abort(404)
     content = (request.form.get("content") or "").strip()
     if content and len(content) <= 1000:
@@ -724,10 +1139,17 @@ def delete_feed_post(post_id):
         return redirect("/login")
     post = db.session.get(FeedPost, post_id)
     if post and post.user_id == session["user_id"]:
+        attachment_urls = [row.media_url for row in PostMedia.query.filter_by(post_id=post_id).all()]
+        if post.media_url:
+            attachment_urls.append(post.media_url)
+        PostMedia.query.filter_by(post_id=post_id).delete(synchronize_session=False)
+        FeedPostAudience.query.filter_by(post_id=post_id).delete(synchronize_session=False)
         FeedComment.query.filter_by(post_id=post_id).delete()
         FeedReaction.query.filter_by(post_id=post_id).delete()
         db.session.delete(post)
         db.session.commit()
+        for media_url in attachment_urls:
+            remove_post_upload(media_url)
     return redirect("/")
 
 
@@ -738,8 +1160,8 @@ def signup():
         email = (request.form.get("email") or "").strip().lower()
         password = request.form.get("password") or ""
 
-        if not username or not email or not password:
-            flash("Username, email, and password are required", "error")
+        if not valid_username(username) or not email or not password:
+            flash("Choose a username using 3–50 letters, numbers, dots, or underscores, and provide your email and password.", "error")
             return redirect("/signup")
 
         if len(password) > 8:
@@ -754,11 +1176,11 @@ def signup():
             flash("Password must be exactly 6 or 8 letters or numbers, with no spaces or symbols", "error")
             return redirect("/signup")
 
-        if User.query.filter_by(username=username).first():
-            flash("User exists", "error")
+        if username_taken(username):
+            flash("That username is already taken. Choose another one.", "error")
             return redirect("/signup")
 
-        if User.query.filter_by(email=email).first():
+        if db.session.query(User.id).filter(func.lower(User.email) == email).first():
             flash("An account already uses that email address", "error")
             return redirect("/signup")
 
@@ -769,8 +1191,16 @@ def signup():
             avatar_url=None,   # default
             bio=""
         ))
-        db.session.commit()
-
+        try:
+            db.session.commit()
+        except IntegrityError:
+            db.session.rollback()
+            if username_taken(username):
+                flash("That username is already taken. Choose another one.", "error")
+            else:
+                flash("An account already uses that email address", "error")
+            return redirect("/signup")
+        flash("Your account is ready. Log in with your email address.", "success")
         return redirect("/login")
 
     return render_template("signup.html")
@@ -779,23 +1209,91 @@ def signup():
 @app.route("/login", methods=["GET", "POST"])
 def login():
     if request.method == "POST":
+        email = (request.form.get("email") or "").strip().lower()
         password = request.form.get("password") or ""
+        if not valid_email(email):
+            flash("Enter a valid email address to log in.", "error")
+            return redirect("/login")
         if len(password) > 8:
             flash("Password cannot be more than 8 characters.", "error")
             return redirect("/login")
-        user = User.query.filter_by(
-            username=(request.form.get("username") or "").strip()
-        ).first()
-
-        if user and check_password_hash(user.password, password):
+        matches = User.query.filter(func.lower(User.email) == email).limit(2).all()
+        if len(matches) > 1:
+            flash("This email is linked to more than one legacy account. Use the account recovery form to give each account a unique email.", "error")
+            return redirect("/login")
+        user = matches[0] if matches else None
+        if not user:
+            flash("No account uses that email address. Older accounts without email can use the account setup link below.", "error")
+            return redirect("/login")
+        if check_password_hash(user.password, password):
             session["user_id"] = user.id
             session.permanent = request.form.get("remember_me") == "on"
+            if not (user.username or "").strip():
+                return redirect(url_for("username_setup"))
             return redirect("/friends")
 
-        flash("Invalid login", "error")
+        flash("Incorrect password for this email address.", "error")
         return redirect("/login")
 
     return render_template("login.html")
+
+
+@app.route("/complete-account", methods=["GET", "POST"])
+def complete_legacy_account():
+    """Let a legacy user attach a unique email without losing their account."""
+    if request.method == "POST":
+        username = (request.form.get("username") or "").strip()
+        password = request.form.get("password") or ""
+        email = (request.form.get("email") or "").strip().lower()
+        account_matches = User.query.filter(func.lower(User.username) == username.lower()).limit(2).all()
+        user = account_matches[0] if len(account_matches) == 1 else None
+        if not user or not check_password_hash(user.password, password):
+            flash("The username or password is incorrect, or the legacy username is ambiguous.", "error")
+        elif not valid_email(email):
+            flash("Enter a valid email address.", "error")
+        elif db.session.query(User.id).filter(func.lower(User.email) == email, User.id != user.id).first():
+            flash("That email address is already linked to another account.", "error")
+        else:
+            user.email = email
+            try:
+                db.session.commit()
+            except IntegrityError:
+                db.session.rollback()
+                flash("That email address is already linked to another account.", "error")
+                return redirect(url_for("complete_legacy_account"))
+            flash("Email saved. You can now log in using your email address.", "success")
+            return redirect("/login")
+        return redirect(url_for("complete_legacy_account"))
+    return render_template("complete_account.html")
+
+
+@app.route("/username-setup", methods=["GET", "POST"])
+def username_setup():
+    if "user_id" not in session:
+        return redirect("/login")
+    user = db.session.get(User, session["user_id"])
+    if not user:
+        session.clear()
+        return redirect("/login")
+    if (user.username or "").strip():
+        return redirect("/")
+    if request.method == "POST":
+        username = (request.form.get("username") or "").strip()
+        if not valid_username(username):
+            flash("Choose a username using 3–50 letters, numbers, dots, or underscores.", "error")
+        elif username_taken(username, exclude_id=user.id):
+            flash("That username is already taken. Choose another one.", "error")
+        else:
+            user.username = username
+            try:
+                db.session.commit()
+            except IntegrityError:
+                db.session.rollback()
+                flash("That username is already taken. Choose another one.", "error")
+            else:
+                flash("Your username is ready.", "success")
+                return redirect("/")
+    return render_template("username_setup.html")
 
 
 @app.route("/forgot-password", methods=["GET", "POST"])
@@ -912,7 +1410,7 @@ def friends():
         )
         available = Message.expires_at.is_(None) | (Message.expires_at > now)
         latest = Message.query.filter(conversation_filter, available).order_by(Message.timestamp.desc(), Message.id.desc()).first()
-        unread_count = Message.query.filter_by(sender_id=friend.id, receiver_id=uid, read_at=None).filter(available).count()
+        unread_count = unread_count_for(uid, friend.id)
         if latest is None:
             preview = "Start a conversation"
             timestamp = None
@@ -1018,7 +1516,7 @@ def add_friend():
         flash("Enter a username", "error")
         return friend_action_redirect()
 
-    other = User.query.filter_by(username=username).first()
+    other = User.query.filter(func.lower(User.username) == username.lower()).first()
     existing = None
     if other is not None and other.id != uid:
         existing = Friendship.query.filter(
@@ -1091,6 +1589,47 @@ def remove_friend(fid):
     return friend_action_redirect()
 
 
+def status_upload_location(media_url):
+    """Resolve private or legacy status media paths inside approved folders."""
+    roots = {
+        "/private-uploads/status/": os.path.join(app.instance_path, "uploads", "status"),
+        "/static/uploads/status/": os.path.join(app.static_folder, "uploads", "status"),
+    }
+    prefix = next((candidate for candidate in roots if media_url and media_url.startswith(candidate)), None)
+    if not prefix:
+        return None
+    filename = media_url[len(prefix):]
+    if not filename or os.path.basename(filename) != filename:
+        return None
+    root = os.path.realpath(roots[prefix])
+    path = os.path.realpath(os.path.join(root, filename))
+    if os.path.commonpath((root, path)) != root:
+        return None
+    return root, filename
+
+
+def remove_status_upload(media_url):
+    location = status_upload_location(media_url)
+    if not location:
+        return
+    try:
+        os.remove(os.path.join(*location))
+    except FileNotFoundError:
+        pass
+    except OSError:
+        app.logger.warning("Could not remove status media: %s", media_url)
+
+
+@app.route("/status/<int:status_id>/media")
+def status_media(status_id):
+    uid = session.get("user_id")
+    status = db.session.get(Status, status_id)
+    location = status_upload_location(status.media_url) if status and status.media_url else None
+    if not can_view_status(uid, status) or not location:
+        abort(404)
+    return send_from_directory(*location)
+
+
 @app.route("/status", methods=["GET", "POST"])
 def status_page():
     if "user_id" not in session:
@@ -1099,6 +1638,28 @@ def status_page():
     uid = session["user_id"]
     if request.method == "POST":
         content = (request.form.get("content") or "").strip()
+        audience = request.form.get("audience", "friends")
+        allowed_audiences = {"everyone", "friends", "selected"}
+        friend_ids = set(get_friends(uid))
+        selected_ids = set()
+        audience_error = None
+        if audience not in allowed_audiences:
+            audience_error = "Choose a valid audience for your update"
+        elif audience == "selected":
+            for raw_id in request.form.getlist("selected_user_ids"):
+                try:
+                    selected_id = int(raw_id)
+                except (TypeError, ValueError):
+                    audience_error = "Choose valid friends for this update"
+                    break
+                if selected_id not in friend_ids:
+                    audience_error = "Only accepted friends can be selected for an update"
+                    break
+                selected_ids.add(selected_id)
+            if not selected_ids and not audience_error:
+                audience_error = "Choose at least one friend for this update"
+        poll_question = (request.form.get("poll_question") or "").strip()
+        poll_options = [option.strip() for option in request.form.getlist("poll_option") if option.strip()]
         media_files = [item for item in request.files.getlist("media_files") if item and item.filename]
         # Continue accepting the original single-file field for older clients.
         if not media_files:
@@ -1143,15 +1704,35 @@ def status_page():
                 break
             uploaded.append((media_file, media_bytes, media_mime))
 
-        if upload_error:
+        poll_error = None
+        if poll_question:
+            if len(poll_question) > 200:
+                poll_error = "Poll questions must be 200 characters or fewer"
+            elif not 2 <= len(poll_options) <= 6:
+                poll_error = "A poll needs between 2 and 6 non-empty options"
+            elif any(len(option) > 100 for option in poll_options):
+                poll_error = "Poll options must be 100 characters or fewer"
+            elif len({option.casefold() for option in poll_options}) != len(poll_options):
+                poll_error = "Poll options must be different"
+            elif len(media_files) > 1:
+                poll_error = "A poll update can include at most one photo, video, or audio file"
+        elif poll_options:
+            poll_error = "Add a poll question before adding poll options"
+
+        if audience_error:
+            flash(audience_error, "error")
+        elif upload_error:
             flash(upload_error, "error")
-        elif not content and not uploaded:
+        elif poll_error:
+            flash(poll_error, "error")
+        elif not content and not uploaded and not poll_question:
             flash("Write an update or add a photo, video, or audio file", "error")
         elif len(content) > 500:
             flash("Update must be 500 characters or fewer", "error")
         else:
             if not uploaded:
                 uploaded = [(None, None, None)]
+            created_statuses = []
             for media_file, media_bytes, media_mime in uploaded:
                 media_url = None
                 media_type = None
@@ -1164,29 +1745,50 @@ def status_page():
                         "audio/mpeg": "mp3", "audio/ogg": "ogg",
                         "audio/wav": "wav", "audio/x-wav": "wav",
                     }[media_mime]
-                    upload_dir = os.path.join(app.static_folder, "uploads", "status")
+                    upload_dir = os.path.join(app.instance_path, "uploads", "status")
                     os.makedirs(upload_dir, exist_ok=True)
                     filename = f"{uuid.uuid4().hex}.{extension}"
                     with open(os.path.join(upload_dir, filename), "wb") as uploaded_file:
                         uploaded_file.write(media_bytes)
-                    media_url = f"/static/uploads/status/{filename}"
+                    media_url = f"/private-uploads/status/{filename}"
                     media_type = media_mime.split("/", 1)[0]
 
-                db.session.add(Status(
+                status = Status(
                     user_id=uid, content=content,
                     media_url=media_url, media_type=media_type,
-                    background=background, text_style=text_style
-                ))
+                    background=background, text_style=text_style, audience=audience
+                )
+                db.session.add(status)
+                created_statuses.append(status)
+            db.session.flush()
+            if selected_ids:
+                db.session.add_all(
+                    StatusAudience(status_id=status.id, user_id=person_id)
+                    for status in created_statuses for person_id in selected_ids
+                )
+            if poll_question and created_statuses:
+                poll = StatusPoll(status_id=created_statuses[0].id, question=poll_question)
+                db.session.add(poll)
+                db.session.flush()
+                db.session.add_all(
+                    StatusPollOption(poll_id=poll.id, label=option, position=position)
+                    for position, option in enumerate(poll_options)
+                )
             db.session.commit()
             flash("Update shared", "success")
             return redirect("/status")
 
     friend_ids = get_friends(uid)
-    visible_ids = friend_ids + [uid]
+    feed_friends = User.query.filter(User.id.in_(friend_ids)).order_by(User.username).all() if friend_ids else []
     cutoff = utcnow() - timedelta(hours=12)
-    statuses = db.session.query(Status, User).join(User, User.id == Status.user_id).filter(
-        Status.user_id.in_(visible_ids), Status.timestamp >= cutoff
-    ).order_by(Status.timestamp.desc()).all() if visible_ids else []
+    recent_statuses = Status.query.filter(Status.timestamp >= cutoff).order_by(Status.timestamp.desc()).all()
+    statuses = []
+    for status in recent_statuses:
+        if not can_view_status(uid, status):
+            continue
+        author = db.session.get(User, status.user_id)
+        if author:
+            statuses.append((status, author))
     own_statuses = [(status, author) for status, author in statuses if author.id == uid]
     friend_statuses = [(status, author) for status, author in statuses if author.id != uid]
     status_ids = [status.id for status, _author in statuses]
@@ -1202,6 +1804,34 @@ def status_page():
         if row.user_id == uid:
             my_reactions[row.status_id] = row.reaction
 
+    poll_info_by_status = {}
+    polls = StatusPoll.query.filter(StatusPoll.status_id.in_(status_ids)).all() if status_ids else []
+    for poll in polls:
+        options = StatusPollOption.query.filter_by(poll_id=poll.id).order_by(
+            StatusPollOption.position, StatusPollOption.id
+        ).all()
+        votes = StatusPollVote.query.filter_by(poll_id=poll.id).all()
+        own_vote = next((vote.option_id for vote in votes if vote.user_id == uid), None)
+        owner_id = next((status.user_id for status, _author in statuses if status.id == poll.status_id), None)
+        results_visible = own_vote is not None or owner_id == uid
+        total_votes = len(votes)
+        vote_counts = {}
+        for vote in votes:
+            vote_counts[vote.option_id] = vote_counts.get(vote.option_id, 0) + 1
+        poll_info_by_status[poll.status_id] = {
+            "id": poll.id,
+            "question": poll.question,
+            "my_vote": own_vote,
+            "results_visible": results_visible,
+            "total_votes": total_votes if results_visible else None,
+            "options": [{
+                "id": option.id,
+                "label": option.label,
+                "votes": vote_counts.get(option.id, 0) if results_visible else None,
+                "percent": round(vote_counts.get(option.id, 0) * 100 / total_votes) if results_visible and total_votes else 0,
+            } for option in options],
+        }
+
     viewer_stories = []
     grouped_stories = {}
     for status, author in statuses:
@@ -1215,8 +1845,9 @@ def status_page():
             "avatar_url": url_for("user_avatar", user_id=author.id) if can_view_profile_picture(author) else None,
             "initial": (author.username or "?")[0].upper(),
             "content": status.content or "",
-            "media_url": status.media_url or "",
+            "media_url": url_for("status_media", status_id=status.id) if status.media_url else "",
             "media_type": status.media_type or "",
+            "audience": status.audience or "friends",
             "background": status.background or "forest",
             "text_style": status.text_style or "classic",
             "timestamp": created_at.isoformat() + "Z",
@@ -1226,6 +1857,7 @@ def status_page():
             "seen": status.id in seen_ids or author.id == uid,
             "reactions": reaction_counts.get(status.id, {}),
             "my_reaction": my_reactions.get(status.id, ""),
+            "poll": poll_info_by_status.get(status.id),
         }
         viewer_stories.append(item)
         group = grouped_stories.get(author.id)
@@ -1241,7 +1873,7 @@ def status_page():
         "status.html", own_statuses=own_statuses,
         friend_statuses=friend_statuses, current_user_id=uid,
         current_user=db.session.get(User, uid), viewer_stories=viewer_stories,
-        story_authors=list(grouped_stories.values()),
+        story_authors=list(grouped_stories.values()), feed_friends=feed_friends,
     )
 
 
@@ -1252,13 +1884,74 @@ def view_status(status_id):
         return jsonify(ok=False, error="Sign in to view updates"), 401
     status = db.session.get(Status, status_id)
     cutoff = utcnow() - timedelta(hours=12)
-    if not status or status.timestamp < cutoff or (status.user_id != uid and
-            (status.user_id not in get_friends(uid) or is_blocked(uid, status.user_id))):
+    if not status or status.timestamp < cutoff or not can_view_status(uid, status):
         return jsonify(ok=False, error="This update is no longer available"), 404
     if status.user_id != uid and not StatusView.query.filter_by(status_id=status_id, viewer_id=uid).first():
         db.session.add(StatusView(status_id=status_id, viewer_id=uid))
         db.session.commit()
     return jsonify(ok=True)
+
+
+def status_poll_results(poll, viewer_id, already_voted=False):
+    options = StatusPollOption.query.filter_by(poll_id=poll.id).order_by(
+        StatusPollOption.position, StatusPollOption.id
+    ).all()
+    votes = StatusPollVote.query.filter_by(poll_id=poll.id).all()
+    counts = {}
+    viewer_vote = None
+    for vote in votes:
+        counts[vote.option_id] = counts.get(vote.option_id, 0) + 1
+        if vote.user_id == viewer_id:
+            viewer_vote = vote.option_id
+    total = len(votes)
+    owner = db.session.get(Status, poll.status_id)
+    results_visible = already_voted or viewer_vote is not None or bool(owner and owner.user_id == viewer_id)
+    return {
+        "id": poll.id,
+        "question": poll.question,
+        "my_vote": viewer_vote,
+        "results_visible": results_visible,
+        "total_votes": total if results_visible else None,
+        "options": [{
+            "id": option.id,
+            "label": option.label,
+            "votes": counts.get(option.id, 0) if results_visible else None,
+            "percent": round(counts.get(option.id, 0) * 100 / total) if results_visible and total else 0,
+        } for option in options],
+    }
+
+
+@app.post("/status/<int:status_id>/poll/vote")
+def vote_on_status_poll(status_id):
+    uid = session.get("user_id")
+    if uid is None:
+        return jsonify(ok=False, error="Sign in to vote"), 401
+    status = db.session.get(Status, status_id)
+    cutoff = utcnow() - timedelta(hours=12)
+    if not status or status.timestamp < cutoff or not can_view_status(uid, status):
+        return jsonify(ok=False, error="This update is no longer available"), 404
+    poll = StatusPoll.query.filter_by(status_id=status_id).first()
+    if not poll:
+        return jsonify(ok=False, error="This update does not have a poll"), 404
+    if status.user_id == uid:
+        return jsonify(ok=False, error="You cannot vote in your own poll"), 403
+    if StatusPollVote.query.filter_by(poll_id=poll.id, user_id=uid).first():
+        return jsonify(ok=False, error="You have already voted in this poll"), 409
+    raw_option_id = (request.get_json(silent=True) or {}).get("option_id")
+    try:
+        option_id = int(raw_option_id)
+    except (TypeError, ValueError):
+        return jsonify(ok=False, error="Choose an option from this poll"), 400
+    option = StatusPollOption.query.filter_by(id=option_id, poll_id=poll.id).first()
+    if not option:
+        return jsonify(ok=False, error="Choose an option from this poll"), 400
+    db.session.add(StatusPollVote(poll_id=poll.id, option_id=option.id, user_id=uid))
+    try:
+        db.session.commit()
+    except IntegrityError:
+        db.session.rollback()
+        return jsonify(ok=False, error="You have already voted in this poll"), 409
+    return jsonify(ok=True, poll=status_poll_results(poll, uid, already_voted=True))
 
 
 @app.post("/status/<int:status_id>/react")
@@ -1269,8 +1962,7 @@ def react_to_status(status_id):
     status = db.session.get(Status, status_id)
     allowed = {"❤️", "😂", "😮", "😢", "👏", "🔥"}
     reaction = (request.get_json(silent=True) or {}).get("reaction", "")
-    if not status or status.timestamp < utcnow() - timedelta(hours=12) or (
-            status.user_id != uid and (status.user_id not in get_friends(uid) or is_blocked(uid, status.user_id))):
+    if not status or status.timestamp < utcnow() - timedelta(hours=12) or not can_view_status(uid, status):
         return jsonify(ok=False, error="This update is no longer available"), 404
     if reaction not in allowed:
         return jsonify(ok=False, error="Choose a supported reaction"), 400
@@ -1302,8 +1994,7 @@ def reply_to_status(status_id):
         return jsonify(ok=False, error="Sign in to reply"), 401
     status = db.session.get(Status, status_id)
     content = ((request.get_json(silent=True) or {}).get("content") or "").strip()
-    if not status or status.user_id == uid or status.timestamp < utcnow() - timedelta(hours=12) or (
-            status.user_id not in get_friends(uid) or is_blocked(uid, status.user_id)):
+    if not status or status.user_id == uid or status.timestamp < utcnow() - timedelta(hours=12) or not can_view_status(uid, status):
         return jsonify(ok=False, error="This update is no longer available"), 404
     if not content:
         return jsonify(ok=False, error="Write a reply first"), 400
@@ -1318,15 +2009,12 @@ def reply_to_status(status_id):
     sender = db.session.get(User, uid)
     recipient = db.session.get(User, status.user_id)
     room_name = room(uid, status.user_id)
-    recipient_is_viewing = bool(chat_room_viewers.get(room_name, {}).get(status.user_id))
     retention = sender.message_retention if sender else "off"
     message = Message(sender_id=uid, receiver_id=status.user_id, content=content,
                       message_type="text", timestamp=now, expires_at=message_expiry(retention, now),
                       delete_after_seen=retention == "seen",
-                      read_receipt_hidden=bool(recipient_is_viewing and recipient and recipient.show_read_receipts is False))
-    if recipient_is_viewing:
-        message.delivered_at = now
-        message.read_at = now
+                      read_receipt_hidden=False)
+    recipient_is_viewing = mark_message_delivery(message, status.user_id, recipient, room_name, now)
     db.session.add(message)
     db.session.commit()
     if remaining is not None:
@@ -1338,6 +2026,7 @@ def reply_to_status(status_id):
                "expires_at": message.expires_at.isoformat() if message.expires_at else None}
     socketio.emit("receive_message", payload, room=room_name)
     notify_inbox(status.user_id, {"sender_id": uid, "receiver_id": status.user_id,
+                                  "message_id": message.id, "is_unread": message.read_at is None,
                                   "content": content, "message_type": "text"})
     if recipient_is_viewing and retention == "seen":
         db.session.delete(message)
@@ -1353,8 +2042,18 @@ def delete_status(status_id):
 
     status = db.session.get(Status, status_id)
     if status and status.user_id == session["user_id"]:
+        media_url = status.media_url
+        poll = StatusPoll.query.filter_by(status_id=status.id).first()
+        if poll:
+            StatusPollVote.query.filter_by(poll_id=poll.id).delete(synchronize_session=False)
+            StatusPollOption.query.filter_by(poll_id=poll.id).delete(synchronize_session=False)
+            db.session.delete(poll)
+        StatusView.query.filter_by(status_id=status.id).delete(synchronize_session=False)
+        StatusReaction.query.filter_by(status_id=status.id).delete(synchronize_session=False)
+        StatusAudience.query.filter_by(status_id=status.id).delete(synchronize_session=False)
         db.session.delete(status)
         db.session.commit()
+        remove_status_upload(media_url)
         flash("Update deleted", "success")
     return redirect("/status")
 
@@ -1389,6 +2088,8 @@ def profile(user_id=None):
         birthday_raw = (request.form.get("birthday") or "").strip()
         gender = (request.form.get("gender") or "").strip()
         location = (request.form.get("location") or "").strip()
+        interests = (request.form.get("interests") or "").strip()
+        occupation = (request.form.get("occupation") or "").strip()
         birthday = None
         birthday_invalid = False
         if birthday_raw:
@@ -1412,11 +2113,13 @@ def profile(user_id=None):
             flash("Choose a valid PNG, JPG, GIF, or WebP image", "error")
         elif email and not valid_email(email):
             flash("Enter a valid recovery email address", "error")
-        elif email and User.query.filter(User.email == email, User.id != user.id).first():
+        elif email and User.query.filter(func.lower(User.email) == email.lower(), User.id != user.id).first():
             flash("That email address is already used by another account", "error")
         elif not username or len(username) > 50:
             flash("Username must be between 1 and 50 characters", "error")
-        elif User.query.filter(User.username == username, User.id != user.id).first():
+        elif username != user.username and not valid_username(username):
+            flash("New usernames must use 3–50 letters, numbers, dots, or underscores.", "error")
+        elif username_taken(username, exclude_id=user.id):
             flash("That username is already in use", "error")
         elif len(full_name) > 100:
             flash("Full name must be 100 characters or fewer", "error")
@@ -1426,6 +2129,10 @@ def profile(user_id=None):
             flash("Gender must be 40 characters or fewer", "error")
         elif len(location) > 120:
             flash("Location must be 120 characters or fewer", "error")
+        elif len(interests) > 300:
+            flash("Interests must be 300 characters or fewer", "error")
+        elif len(occupation) > 100:
+            flash("Occupation must be 100 characters or fewer", "error")
         elif len(bio) > 120:
             flash("Your bio must be 120 characters or fewer", "error")
         else:
@@ -1446,6 +2153,8 @@ def profile(user_id=None):
             user.birthday = birthday
             user.gender = gender or None
             user.location = location or None
+            user.interests = interests or None
+            user.occupation = occupation or None
             db.session.commit()
             flash("Profile updated", "success")
             return redirect("/profile")
@@ -1502,6 +2211,7 @@ def settings():
             else:
                 user.allow_messages_from = messages_from
                 user.avatar_visibility = avatar_visibility
+                user.show_birthday = request.form.get("show_birthday") == "on"
                 db.session.commit()
                 flash("Privacy choices saved.", "success")
                 return redirect("/settings")
@@ -1511,6 +2221,17 @@ def settings():
             db.session.commit()
             flash("Notification settings saved.", "success")
             return redirect("/settings")
+
+        if section == "appearance":
+            mode = request.form.get("appearance_mode")
+            if mode not in {"light", "dark"}:
+                flash("Choose light or dark mode.", "error")
+            else:
+                user.appearance_mode = mode
+                db.session.commit()
+                socketio.emit("appearance_updated", {"mode": mode}, to=f"user_{user.id}")
+                flash("Appearance preference saved.", "success")
+                return redirect("/settings")
 
         if section == "theme":
             theme = request.form.get("default_chat_theme")
@@ -1575,9 +2296,15 @@ def delete_user_account(user):
     statuses = Status.query.filter_by(user_id=uid).all()
     owned_stickers = Sticker.query.filter_by(owner_id=uid).all()
     post_ids = [row.id for row in posts]
+    status_ids = [row.id for row in statuses]
+    status_poll_ids = [row.id for row in StatusPoll.query.filter(
+        StatusPoll.status_id.in_(status_ids) if status_ids else False
+    ).all()]
+    post_media = PostMedia.query.filter(PostMedia.post_id.in_(post_ids)).all() if post_ids else []
     owned_sticker_ids = [row.id for row in owned_stickers]
     uploaded_media = [user.avatar_url]
     uploaded_media.extend(row.media_url for row in posts)
+    uploaded_media.extend(row.media_url for row in post_media)
     uploaded_media.extend(row.media_url for row in statuses)
     uploaded_media.extend(
         row.value for row in owned_stickers if row.sticker_type == "image"
@@ -1593,9 +2320,32 @@ def delete_user_account(user):
     UserBlock.query.filter((UserBlock.blocker_id == uid) | (UserBlock.blocked_id == uid)).delete(synchronize_session=False)
     ChatPreference.query.filter((ChatPreference.user_id == uid) | (ChatPreference.friend_id == uid)).delete(synchronize_session=False)
     ConversationArchive.query.filter((ConversationArchive.user_id == uid) | (ConversationArchive.peer_id == uid)).delete(synchronize_session=False)
+    StatusPollVote.query.filter(
+        (StatusPollVote.user_id == uid) |
+        (StatusPollVote.poll_id.in_(status_poll_ids) if status_poll_ids else False)
+    ).delete(synchronize_session=False)
+    StatusPollOption.query.filter(StatusPollOption.poll_id.in_(status_poll_ids) if status_poll_ids else False).delete(synchronize_session=False)
+    StatusPoll.query.filter(StatusPoll.id.in_(status_poll_ids) if status_poll_ids else False).delete(synchronize_session=False)
+    StatusView.query.filter(
+        (StatusView.viewer_id == uid) |
+        (StatusView.status_id.in_(status_ids) if status_ids else False)
+    ).delete(synchronize_session=False)
+    StatusAudience.query.filter(
+        (StatusAudience.user_id == uid) |
+        (StatusAudience.status_id.in_(status_ids) if status_ids else False)
+    ).delete(synchronize_session=False)
+    StatusReaction.query.filter(
+        (StatusReaction.user_id == uid) |
+        (StatusReaction.status_id.in_(status_ids) if status_ids else False)
+    ).delete(synchronize_session=False)
     Status.query.filter_by(user_id=uid).delete(synchronize_session=False)
     FeedComment.query.filter((FeedComment.user_id == uid) | (FeedComment.post_id.in_(post_ids) if post_ids else False)).delete(synchronize_session=False)
     FeedReaction.query.filter((FeedReaction.user_id == uid) | (FeedReaction.post_id.in_(post_ids) if post_ids else False)).delete(synchronize_session=False)
+    FeedPostAudience.query.filter(
+        (FeedPostAudience.user_id == uid) |
+        (FeedPostAudience.post_id.in_(post_ids) if post_ids else False)
+    ).delete(synchronize_session=False)
+    PostMedia.query.filter(PostMedia.post_id.in_(post_ids) if post_ids else False).delete(synchronize_session=False)
     FeedPost.query.filter_by(user_id=uid).delete(synchronize_session=False)
     UserSticker.query.filter((UserSticker.user_id == uid) | (UserSticker.sticker_id.in_(owned_sticker_ids) if owned_sticker_ids else False)).delete(synchronize_session=False)
     StickerShare.query.filter((StickerShare.user_id == uid) | (StickerShare.sticker_id.in_(owned_sticker_ids) if owned_sticker_ids else False)).delete(synchronize_session=False)
@@ -1605,13 +2355,24 @@ def delete_user_account(user):
     db.session.commit()
 
     # Remove files owned by the deleted account after the database transaction
-    # succeeds. Only paths beneath static/uploads are eligible for cleanup.
+    # succeeds. Only files within the application's upload directories qualify.
     uploads_root = os.path.realpath(os.path.join(app.static_folder, "uploads"))
+    private_uploads_root = os.path.realpath(os.path.join(app.instance_path, "uploads"))
     for media_url in uploaded_media:
-        if not media_url or not media_url.startswith("/static/uploads/"):
+        if not media_url:
             continue
-        file_path = os.path.realpath(os.path.join(app.static_folder, media_url.removeprefix("/static/")))
-        if os.path.commonpath((uploads_root, file_path)) != uploads_root:
+        if media_url.startswith("/static/uploads/"):
+            file_path = os.path.realpath(os.path.join(app.static_folder, media_url.removeprefix("/static/")))
+            allowed_root = uploads_root
+        elif media_url.startswith("/private-uploads/posts/"):
+            file_path = os.path.realpath(os.path.join(private_uploads_root, "posts", media_url.removeprefix("/private-uploads/posts/")))
+            allowed_root = private_uploads_root
+        elif media_url.startswith("/private-uploads/status/"):
+            file_path = os.path.realpath(os.path.join(private_uploads_root, "status", media_url.removeprefix("/private-uploads/status/")))
+            allowed_root = private_uploads_root
+        else:
+            continue
+        if os.path.commonpath((allowed_root, file_path)) != allowed_root:
             continue
         try:
             if os.path.isfile(file_path):
@@ -1990,23 +2751,31 @@ def on_join(data):
 
     unread = Message.query.filter_by(
         sender_id=fid, receiver_id=uid, read_at=None
-    ).all()
+    ).filter(Message.expires_at.is_(None) | (Message.expires_at > utcnow())).all()
     if unread:
         now = utcnow()
         reader = db.session.get(User, uid)
+        delivered_message_ids = []
         seen_message_ids = []
         read_message_ids = []
         for message in unread:
             if message.delete_after_seen:
+                delivered_message_ids.append(message.id)
                 seen_message_ids.append(message.id)
                 db.session.delete(message)
             else:
                 message.delivered_at = message.delivered_at or now
+                delivered_message_ids.append(message.id)
                 message.read_at = now
                 message.read_receipt_hidden = reader.show_read_receipts is False if reader else False
                 if not message.read_receipt_hidden:
                     read_message_ids.append(message.id)
         db.session.commit()
+        if delivered_message_ids:
+            emit("receipt_update", {
+                "message_ids": delivered_message_ids,
+                "status": "delivered",
+            }, room=room_name)
         if read_message_ids:
             emit("receipt_update", {
                 "message_ids": read_message_ids,
@@ -2014,6 +2783,7 @@ def on_join(data):
             }, room=room_name)
         if seen_message_ids:
             emit("message_deleted", {"ids": seen_message_ids}, room=room_name)
+    emit_unread_count(uid, fid)
 
 
 @socketio.on("send_message")
@@ -2049,9 +2819,7 @@ def handle_send_message(data):
         delete_after_seen=retention == "seen",
         read_receipt_hidden=bool(recipient_is_viewing and recipient and recipient.show_read_receipts is False),
     )
-    if recipient_is_viewing:
-        msg.delivered_at = now
-        msg.read_at = msg.delivered_at
+    mark_message_delivery(msg, fid, recipient, room(uid, fid), now)
 
     db.session.add(msg)
     db.session.commit()
@@ -2068,8 +2836,9 @@ def handle_send_message(data):
         "receipt": "seen" if msg.read_at and not msg.read_receipt_hidden else ("delivered" if msg.delivered_at else "sent"),
         "expires_at": msg.expires_at.isoformat() if msg.expires_at else None,
     }, room=room(uid, fid))
-    notify_inbox(fid, {"sender_id": uid, "receiver_id": fid,
-                       "content": msg.content, "message_type": msg.message_type or "text"})
+    notify_inbox(fid, {"sender_id": uid, "receiver_id": fid, "message_id": msg.id,
+                       "is_unread": msg.read_at is None, "content": msg.content,
+                       "message_type": msg.message_type or "text"})
     if recipient_is_viewing and retention == "seen":
         db.session.delete(msg)
         db.session.commit()
@@ -2109,9 +2878,7 @@ def handle_send_sticker(data):
                       expires_at=message_expiry(retention, now),
                       delete_after_seen=retention == "seen",
                       read_receipt_hidden=bool(recipient_is_viewing and recipient and recipient.show_read_receipts is False))
-    if recipient_is_viewing:
-        message.delivered_at = now
-        message.read_at = now
+    mark_message_delivery(message, fid, recipient, room_name, now)
     preference = UserSticker.query.filter_by(user_id=uid, sticker_id=sticker_id).first()
     if preference is None:
         preference = UserSticker(user_id=uid, sticker_id=sticker_id)
@@ -2135,8 +2902,9 @@ def handle_send_sticker(data):
                            "value": sticker.value, "type": sticker.sticker_type,
                            "pack": sticker.pack, "owner_id": sticker.owner_id}}
     emit("receive_message", payload, room=room_name)
-    notify_inbox(fid, {"sender_id": uid, "receiver_id": fid,
-                       "content": sticker.name, "message_type": "sticker"})
+    notify_inbox(fid, {"sender_id": uid, "receiver_id": fid, "message_id": message.id,
+                       "is_unread": message.read_at is None, "content": sticker.name,
+                       "message_type": "sticker"})
     if recipient_is_viewing and retention == "seen":
         db.session.delete(message)
         db.session.commit()
@@ -2242,9 +3010,7 @@ def handle_forward_message(data):
         delete_after_seen=retention == "seen",
         read_receipt_hidden=bool(target_is_viewing and recipient and recipient.show_read_receipts is False),
     )
-    if target_is_viewing:
-        forwarded.delivered_at = now
-        forwarded.read_at = forwarded.delivered_at
+    mark_message_delivery(forwarded, target_id, recipient, target_room, now)
     if forwarded_sticker:
         target_preference = UserSticker.query.filter_by(user_id=target_id, sticker_id=forwarded_sticker.id).first()
         if target_preference is None:
@@ -2275,8 +3041,9 @@ def handle_forward_message(data):
                               "type": forwarded_sticker.sticker_type, "pack": forwarded_sticker.pack,
                               "owner_id": forwarded_sticker.owner_id}
     emit("receive_message", payload, room=target_room)
-    notify_inbox(target_id, {"sender_id": uid, "receiver_id": target_id,
-                             "content": forwarded.content, "message_type": forwarded.message_type or "text"})
+    notify_inbox(target_id, {"sender_id": uid, "receiver_id": target_id, "message_id": forwarded.id,
+                             "is_unread": forwarded.read_at is None, "content": forwarded.content,
+                             "message_type": forwarded.message_type or "text"})
     if target_is_viewing and retention == "seen":
         forwarded_id = forwarded.id
         db.session.delete(forwarded)
@@ -2326,6 +3093,64 @@ def pick_port(preferred=5000, tries=20):
     return preferred
 
 
+def migrate_legacy_status_media():
+    """Move referenced public status files to private storage without loss.
+
+    A status row is redirected to the private copy only after the copy verifies
+    and the new URL commits. The old static file is removed only when no rows
+    still reference it, making this safe to retry after an interrupted startup.
+    """
+    os.makedirs(os.path.join(app.instance_path, "uploads", "status"), exist_ok=True)
+
+    def digest(path):
+        value = hashlib.sha256()
+        with open(path, "rb") as source:
+            for chunk in iter(lambda: source.read(1024 * 1024), b""):
+                value.update(chunk)
+        return value.digest()
+
+    legacy_rows = Status.query.filter(Status.media_url.like("/static/uploads/status/%")).all()
+    for status in legacy_rows:
+        old_url = status.media_url
+        source_location = status_upload_location(old_url)
+        if not source_location:
+            app.logger.warning("Skipping an unsafe legacy status media path on update %s", status.id)
+            continue
+        source_path = os.path.join(*source_location)
+        if not os.path.isfile(source_path):
+            app.logger.warning("Legacy status media file is missing for update %s", status.id)
+            continue
+
+        private_root = os.path.realpath(os.path.join(app.instance_path, "uploads", "status"))
+        filename = source_location[1]
+        destination_path = os.path.realpath(os.path.join(private_root, filename))
+        if os.path.commonpath((private_root, destination_path)) != private_root:
+            continue
+        if os.path.exists(destination_path) and digest(source_path) != digest(destination_path):
+            filename = f"{uuid.uuid4().hex}{os.path.splitext(filename)[1]}"
+            destination_path = os.path.join(private_root, filename)
+        try:
+            if not os.path.exists(destination_path):
+                shutil.copy2(source_path, destination_path)
+            if digest(source_path) != digest(destination_path):
+                app.logger.error("Status media copy verification failed for update %s", status.id)
+                continue
+            status.media_url = f"/private-uploads/status/{filename}"
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+            app.logger.exception("Could not migrate status media for update %s", status.id)
+            continue
+
+        if not Status.query.filter_by(media_url=old_url).first():
+            try:
+                os.remove(source_path)
+            except FileNotFoundError:
+                pass
+            except OSError:
+                app.logger.warning("Could not remove migrated public status media: %s", old_url)
+
+
 # ======================
 # RUN SERVER
 # ======================
@@ -2336,6 +3161,7 @@ with app.app_context():
     _added = ensure_schema()
     if _added:
         print("Schema updated: " + ", ".join(_added))
+    migrate_legacy_status_media()
 
 
 if __name__ == "__main__":

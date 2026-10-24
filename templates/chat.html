@@ -41,7 +41,8 @@
     <div class="main-panel">
 
         <div class="container chat-theme-container" id="chat-theme-container"
-             style="--chat-bg: {{ chat_theme.bg }}; --chat-sent: {{ chat_theme.sent }}; --chat-received: {{ chat_theme.received }}; --chat-accent: {{ chat_theme.accent }};">
+             data-theme-mode="{{ current_appearance_mode() }}"
+             style="--chat-bg: {{ chat_theme.bg if current_appearance_mode() == 'light' else chat_theme.dark_bg }}; --chat-sent: {{ chat_theme.sent if current_appearance_mode() == 'light' else chat_theme.dark_sent }}; --chat-received: {{ chat_theme.received if current_appearance_mode() == 'light' else chat_theme.dark_received }}; --chat-accent: {{ chat_theme.accent if current_appearance_mode() == 'light' else chat_theme.dark_accent }};">
 
             <div class="chat-header">
                 <a href="/friends" class="back-link" title="All chats">&#8249;</a>
@@ -88,6 +89,8 @@
                     <button type="button" class="chat-theme-option{% if key == chat_theme_name %} selected{% endif %}"
                             data-theme="{{ key }}" data-bg="{{ theme.bg }}" data-sent="{{ theme.sent }}"
                             data-received="{{ theme.received }}" data-accent="{{ theme.accent }}"
+                            data-dark-bg="{{ theme.dark_bg }}" data-dark-sent="{{ theme.dark_sent }}"
+                            data-dark-received="{{ theme.dark_received }}" data-dark-accent="{{ theme.dark_accent }}"
                             aria-label="{{ theme.label }} theme" title="{{ theme.label }}">
                         <span class="chat-theme-swatch" style="--swatch-bg: {{ theme.bg }}; --swatch-sent: {{ theme.sent }};"></span>
                         <span>{{ theme.label }}</span>
@@ -115,8 +118,9 @@
                             {% if sticker and sticker.sticker_type == 'image' %}<img src="{{ sticker.value }}" alt="{{ sticker.name }}" loading="lazy">{% elif sticker %}{{ sticker.value }}{% else %}Sticker unavailable{% endif %}
                         </span>
                     {% else %}<span class="bubble-content">{{ m.content }}</span>{% endif %}
-                    {% if m.sender_id == current_user_id and m.read_at and not m.read_receipt_hidden %}<span class="message-receipt seen">Seen</span>
-                    {% elif m.sender_id == current_user_id and m.delivered_at %}<span class="message-receipt delivered" title="Delivered" aria-label="Delivered"></span>{% endif %}
+                    {% if m.sender_id == current_user_id %}{% if m.read_at and not m.read_receipt_hidden %}<span class="message-receipt seen" title="Read" aria-label="Read">✓✓</span>
+                    {% elif m.delivered_at %}<span class="message-receipt delivered" title="Delivered" aria-label="Delivered">✓✓</span>
+                    {% else %}<span class="message-receipt sent" title="Sent" aria-label="Sent">✓</span>{% endif %}{% endif %}
                 </div>
                 {% endfor %}
             </div>
@@ -261,22 +265,31 @@ const chatSettingsPanel = document.getElementById("chat-settings-panel");
 const chatThemeContainer = document.getElementById("chat-theme-container");
 
 function applyChatTheme(option) {
+    const dark = document.body.classList.contains("dark-mode");
+    const bg = dark ? option.dataset.darkBg : option.dataset.bg;
+    const sent = dark ? option.dataset.darkSent : option.dataset.sent;
+    const received = dark ? option.dataset.darkReceived : option.dataset.received;
+    const accent = dark ? option.dataset.darkAccent : option.dataset.accent;
     const colors = {
-        "--chat-bg": option.dataset.bg,
-        "--chat-sent": option.dataset.sent,
-        "--chat-received": option.dataset.received,
-        "--chat-accent": option.dataset.accent
+        "--chat-bg": bg,
+        "--chat-sent": sent,
+        "--chat-received": received,
+        "--chat-accent": accent
     };
     Object.entries(colors).forEach(([name, value]) => chatThemeContainer.style.setProperty(name, value));
-    chatBox.style.setProperty("background-color", option.dataset.bg, "important");
-    chatThemeContainer.querySelector(".chat-header").style.setProperty("background-color", option.dataset.bg, "important");
-    chatThemeContainer.querySelector("#sendBtn").style.setProperty("background-color", option.dataset.accent, "important");
-    chatBox.querySelectorAll(".bubble.sent").forEach((bubble) => bubble.style.setProperty("background-color", option.dataset.sent, "important"));
-    chatBox.querySelectorAll(".bubble.received").forEach((bubble) => bubble.style.setProperty("background-color", option.dataset.received, "important"));
+    chatBox.style.setProperty("background-color", bg, "important");
+    chatThemeContainer.querySelector(".chat-header").style.setProperty("background-color", bg, "important");
+    chatThemeContainer.querySelector("#sendBtn").style.setProperty("background-color", accent, "important");
+    chatBox.querySelectorAll(".bubble.sent").forEach((bubble) => bubble.style.setProperty("background-color", sent, "important"));
+    chatBox.querySelectorAll(".bubble.received").forEach((bubble) => bubble.style.setProperty("background-color", received, "important"));
 }
 
 const initialTheme = chatSettingsPanel.querySelector(".chat-theme-option.selected") || chatSettingsPanel.querySelector(".chat-theme-option");
 if (initialTheme) applyChatTheme(initialTheme);
+new MutationObserver(() => {
+    const selected = chatSettingsPanel.querySelector(".chat-theme-option.selected");
+    if (selected) applyChatTheme(selected);
+}).observe(document.body, { attributes: true, attributeFilter: ["class"] });
 
 chatThemeToggle.addEventListener("click", () => {
     chatSettingsPanel.hidden = !chatSettingsPanel.hidden;
@@ -322,14 +335,21 @@ socket.emit("join", { friend_id: friendId });
 // =====================
 function setReceipt(bubble, status) {
     bubble.querySelector(".message-receipt")?.remove();
-    if (!bubble.classList.contains("sent") || status === "sent") return;
+    if (!bubble.classList.contains("sent")) return;
     const receipt = document.createElement("span");
-    receipt.className = "message-receipt " + (status === "seen" ? "seen" : "delivered");
+    receipt.className = "message-receipt " + (status === "seen" ? "seen" : status === "delivered" ? "delivered" : "sent");
     if (status === "seen") {
-        receipt.textContent = "Seen";
-    } else {
+        receipt.textContent = "✓✓";
+        receipt.title = "Read";
+        receipt.setAttribute("aria-label", "Read");
+    } else if (status === "delivered") {
+        receipt.textContent = "✓✓";
         receipt.title = "Delivered";
         receipt.setAttribute("aria-label", "Delivered");
+    } else {
+        receipt.textContent = "✓";
+        receipt.title = "Sent";
+        receipt.setAttribute("aria-label", "Sent");
     }
     bubble.appendChild(receipt);
 }
@@ -353,8 +373,9 @@ function renderSticker(span, sticker) {
 function addBubble(content, mine, messageId, status = "sent", messageType = "text", sticker = null) {
     const div = document.createElement("div");
     div.className = "bubble " + (mine ? "sent" : "received");
-    const activeTheme = chatSettingsPanel.querySelector(".chat-theme-option.selected");
-    if (activeTheme) div.style.setProperty("background-color", mine ? activeTheme.dataset.sent : activeTheme.dataset.received, "important");
+    if (chatThemeContainer) {
+        div.style.setProperty("background-color", mine ? "var(--chat-sent)" : "var(--chat-received)", "important");
+    }
     if (messageType === "sticker") div.classList.add("sticker-bubble");
     div.dataset.messageId = messageId;
     const text = document.createElement("span");

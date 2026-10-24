@@ -1,7 +1,7 @@
 # CHATTI
 
-A small real-time chat app built with Flask, Flask-SocketIO and SQLite.
-Sign up, add friends by username, then chat with them live over WebSockets.
+A real-time social messaging app built with Flask, Flask-SocketIO and SQLite.
+Sign in with your email address, find friends by username, and chat live over WebSockets.
 
 ## Requirements
 
@@ -84,12 +84,13 @@ Stop it with `Ctrl+C`.
 
 ## Using it
 
-1. Go to `/signup` and create an account.
-2. Add a working email address when signing up. Existing users can add one from **Profile**.
-3. Log in.
-4. On the **Friends** page, type another user's username and add them.
+1. Go to `/signup` and create an account with a unique email address and username.
+2. Log in with your email address and password. CHATTI never uses usernames for normal login.
+3. On the **People** page, find someone by their username and send a friend request.
    (Friendships are one-way rows but work in both directions once added.)
-5. Click a friend to open the chat and send messages.
+4. Click an accepted friend to open the chat and send messages.
+
+Older accounts without an email can use **Set up an email for an existing account** on the login page. This one-time form verifies the existing username and password, then attaches a unique email to the same account. It does not create a replacement account or remove messages or friendships. Accounts with no username after login are prompted to choose one before using CHATTI.
 
 ## Password recovery
 
@@ -112,8 +113,8 @@ APP_BASE_URL=https://chat.example.com
 
 Use your email provider's SMTP host and credentials. Set `SECRET_KEY` to a long,
 random value and `APP_BASE_URL` to the
-URL users open in their browser so reset links point to the right site. Existing
-accounts need an email saved in **Profile** before they can recover access.
+URL users open in their browser so reset links point to the right site. Password
+recovery is available through the email address attached to each account.
 
 To try the real-time side yourself, open a second browser (or a private window),
 sign up as a second user, add the first user as a friend, and chat between them.
@@ -132,10 +133,15 @@ python init_db.py      # create tables + report the schema
 python migrate_db.py   # same, and print every table's columns
 ```
 
-Both are convenience wrappers — the app already does this on import.
+Both are convenience wrappers — the app already does this on import. Keep
+`instance/chatti.db` in place: it contains user accounts, messages, friendships,
+posts, and settings. Schema changes are applied without recreating the database.
 
-To start over with a clean database, delete `instance/chatti.db` and restart.
-This deletes all users and messages.
+## Updates and polls
+
+Updates appear in the horizontal story row and expire after 12 hours. A user can
+create a poll with a question and two to six distinct options. Friends can vote
+once; the creator and people who have voted can see vote totals and percentages.
 
 ## Troubleshooting
 

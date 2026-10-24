@@ -23,9 +23,11 @@
         <div class="profile-about" id="profile-about">
             <span>About me</span>
             <p>{{ user.bio or 'Add a little about yourself.' }}</p>
-            {% if user.birthday %}<span>Birthday</span><p>{{ user.birthday.strftime('%B %d, %Y') }}</p>{% endif %}
+            {% if user.birthday and (is_owner or user.show_birthday) %}<span>Birthday</span><p>{{ user.birthday.strftime('%B %d, %Y') }}</p>{% endif %}
             {% if user.gender %}<span>Gender</span><p>{{ user.gender }}</p>{% endif %}
             {% if user.location %}<span>Location</span><p>{{ user.location }}</p>{% endif %}
+            {% if user.occupation %}<span>Occupation</span><p>{{ user.occupation }}</p>{% endif %}
+            {% if user.interests %}<span>Interests and hobbies</span><p>{{ user.interests }}</p>{% endif %}
             {% if is_owner %}
             <span class="profile-email-label">Email address</span>
             <p>{{ user.email or 'Add an email address so you can recover your password.' }}</p>
@@ -66,6 +68,14 @@
             <label for="profile-location">Location <small>(optional)</small></label>
             <input id="profile-location" type="text" name="location" maxlength="120"
                    autocomplete="address-level2" value="{{ user.location or '' }}" placeholder="City or region">
+
+            <label for="profile-occupation">Occupation <small>(optional)</small></label>
+            <input id="profile-occupation" type="text" name="occupation" maxlength="100"
+                   value="{{ user.occupation or '' }}" placeholder="What do you do?">
+
+            <label for="profile-interests">Interests and hobbies <small>(optional)</small></label>
+            <textarea id="profile-interests" name="interests" maxlength="300" rows="2"
+                      placeholder="Music, books, football…">{{ user.interests or '' }}</textarea>
 
             <label for="bio">About</label>
             <textarea id="bio" name="bio" maxlength="120" rows="3"

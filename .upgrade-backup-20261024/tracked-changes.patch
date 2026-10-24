@@ -1,0 +1,280 @@
+diff --git a/app.py b/app.py
+index 3cbb19e..cebf36c 100644
+--- a/app.py
++++ b/app.py
+@@ -13,6 +13,7 @@ from flask import (
+ )
+ from flask_sqlalchemy import SQLAlchemy
+ from sqlalchemy import func, inspect, text, update
++from sqlalchemy.exc import IntegrityError
+ from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
+ from werkzeug.security import generate_password_hash, check_password_hash
+ 
+@@ -282,6 +283,7 @@ class FeedReaction(db.Model):
+     user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+     reaction = db.Column(db.String(20), nullable=False, default="like")
+     created_at = db.Column(db.DateTime, default=utcnow)
++    __table_args__ = (db.UniqueConstraint("post_id", "user_id", name="uq_feed_reaction_post_user"),)
+ 
+ 
+ # ======================
+@@ -324,6 +326,25 @@ def ensure_schema():
+             )
+             added.append(f"{table}.{column.name}")
+ 
++    # Older CHATTI databases predate the per-user reaction constraint. Keep
++    # the most recently selected reaction for each pair before adding the
++    # unique index, preserving the intended one-reaction-per-person behavior.
++    if "feed_reaction" in inspector.get_table_names():
++        duplicate_sets = db.session.query(
++            FeedReaction.post_id, FeedReaction.user_id, func.count(FeedReaction.id)
++        ).group_by(FeedReaction.post_id, FeedReaction.user_id).having(func.count(FeedReaction.id) > 1).all()
++        for post_id, user_id, _count in duplicate_sets:
++            rows = FeedReaction.query.filter_by(post_id=post_id, user_id=user_id).order_by(
++                FeedReaction.created_at.desc(), FeedReaction.id.desc()
++            ).all()
++            for duplicate in rows[1:]:
++                db.session.delete(duplicate)
++        db.session.flush()
++        db.session.execute(text(
++            "CREATE UNIQUE INDEX IF NOT EXISTS uq_feed_reaction_post_user "
++            "ON feed_reaction (post_id, user_id)"
++        ))
++
+     db.session.commit()
+     return added
+ 
+@@ -569,19 +590,38 @@ def home():
+     visible_ids = get_friends(uid) + [uid]
+     posts = FeedPost.query.filter(FeedPost.user_id.in_(visible_ids)).order_by(FeedPost.created_at.desc()).all()
+     feed_items = []
++    feed_reaction_options = [
++        ("love", "Love", "❤️"), ("like", "Like", "👍"), ("funny", "Funny", "😂"),
++        ("wow", "Wow", "😮"), ("sad", "Sad", "😢"), ("angry", "Angry", "😡"),
++        ("fire", "Fire", "🔥"), ("applause", "Applause", "👏"), ("adore", "Adore", "🥰"),
++        ("purple_heart", "Purple Heart", "💜"), ("celebrate", "Celebrate", "🎉"),
++        ("thinking", "Thinking", "🤔"),
++    ]
+     for post in posts:
+         author = db.session.get(User, post.user_id)
+         comments = FeedComment.query.filter_by(post_id=post.id).order_by(FeedComment.created_at.asc()).all()
+         comment_items = [(comment, db.session.get(User, comment.user_id)) for comment in comments]
+         reactions = FeedReaction.query.filter_by(post_id=post.id).all()
++        reaction_counts = {key: 0 for key, _label, _emoji in feed_reaction_options}
++        reaction_people = {key: [] for key, _label, _emoji in feed_reaction_options}
++        for reaction in reactions:
++            key = "funny" if reaction.reaction == "laugh" else reaction.reaction
++            if key in reaction_counts:
++                reaction_counts[key] += 1
++                reactor = db.session.get(User, reaction.user_id)
++                if reactor:
++                    reaction_people[key].append(reactor.username)
++        mine = next((item.reaction for item in reactions if item.user_id == uid), None)
+         feed_items.append({
+             "post": post, "author": author, "comments": comment_items,
+-            "reaction_counts": {key: sum(1 for item in reactions if item.reaction == key)
+-                                for key in ("like", "love", "laugh")},
+-            "my_reaction": next((item.reaction for item in reactions if item.user_id == uid), None),
++            "reaction_counts": reaction_counts,
++            "reaction_people": reaction_people,
++            "reaction_total": sum(reaction_counts.values()),
++            "my_reaction": "funny" if mine == "laugh" else mine,
+         })
+     current_user = db.session.get(User, uid)
+-    return render_template("home.html", feed_items=feed_items, current_user=current_user)
++    return render_template("home.html", feed_items=feed_items, current_user=current_user,
++                           feed_reaction_options=feed_reaction_options)
+ 
+ 
+ @app.route("/conversations/search")
+@@ -684,13 +724,20 @@ def create_feed_post():
+ @app.route("/posts/<int:post_id>/react", methods=["POST"])
+ def react_to_post(post_id):
+     if "user_id" not in session:
+-        return redirect("/login")
++        return (jsonify(ok=False, error="Please sign in to react"), 401) if request.is_json else redirect("/login")
+     uid = session["user_id"]
+     post = db.session.get(FeedPost, post_id)
+     if not post or (post.user_id != uid and not are_friends(uid, post.user_id)):
++        if request.is_json:
++            return jsonify(ok=False, error="You cannot react to this post"), 404
+         abort(404)
+-    reaction = request.form.get("reaction", "like")
+-    if reaction not in {"like", "love", "laugh"}:
++    options = {"like", "love", "funny", "wow", "sad", "angry", "fire", "applause", "adore", "purple_heart", "celebrate", "thinking"}
++    payload = request.get_json(silent=True) if request.is_json else None
++    reaction = (payload.get("reaction") if isinstance(payload, dict) else None) if request.is_json else request.form.get("reaction", "like")
++    reaction = "funny" if reaction == "laugh" else reaction
++    if reaction not in options:
++        if request.is_json:
++            return jsonify(ok=False, error="Choose one of the available reactions"), 400
+         abort(400)
+     existing = FeedReaction.query.filter_by(post_id=post_id, user_id=uid).first()
+     if existing and existing.reaction == reaction:
+@@ -699,7 +746,36 @@ def react_to_post(post_id):
+         existing.reaction = reaction
+     else:
+         db.session.add(FeedReaction(post_id=post_id, user_id=uid, reaction=reaction))
+-    db.session.commit()
++    try:
++        db.session.commit()
++    except IntegrityError:
++        # A simultaneous first reaction may race between the lookup and insert.
++        # The unique key remains authoritative; reload and apply the user's choice.
++        db.session.rollback()
++        existing = FeedReaction.query.filter_by(post_id=post_id, user_id=uid).first()
++        if existing and existing.reaction == reaction:
++            db.session.delete(existing)
++        elif existing:
++            existing.reaction = reaction
++        else:
++            db.session.add(FeedReaction(post_id=post_id, user_id=uid, reaction=reaction))
++        db.session.commit()
++    if request.is_json:
++        rows = FeedReaction.query.filter_by(post_id=post_id).all()
++        reaction_counts = {key: 0 for key in options}
++        reaction_people = {key: [] for key in options}
++        mine = None
++        for row in rows:
++            key = "funny" if row.reaction == "laugh" else row.reaction
++            if key in reaction_counts:
++                reaction_counts[key] += 1
++                reactor = db.session.get(User, row.user_id)
++                if reactor:
++                    reaction_people[key].append(reactor.username)
++            if row.user_id == uid:
++                mine = key
++        return jsonify(ok=True, my_reaction=mine, reaction_counts=reaction_counts,
++                       reaction_people=reaction_people, reaction_total=sum(reaction_counts.values()))
+     return redirect("/")
+ 
+ 
+diff --git a/static/style.css b/static/style.css
+index edb660e..2ff0b14 100644
+--- a/static/style.css
++++ b/static/style.css
+@@ -4043,6 +4043,29 @@ body.dark-mode.app-authenticated .pending-message-notice.is-limit-reached { colo
+ .profile-about > p { margin: 4px 0 0; color: var(--ui-text); line-height: 1.5; }
+ .profile-form > label { margin-top: 10px; }
+ 
++/* Compact, persistent Home post reactions */
++.feed-post-stats { align-items: center; gap: 12px; }
++.feed-reaction-total { color: var(--ui-muted); font-size: .78rem; }
++.feed-reaction-total strong { color: var(--ui-text); }
++.feed-reaction-breakdown { display: flex; flex-wrap: wrap; gap: 5px; min-height: 0; padding-bottom: 7px; }
++.feed-reaction-detail { position: relative; }
++.feed-reaction-detail summary { list-style: none; padding: 3px 8px; border: 1px solid var(--ui-border); border-radius: 999px; background: var(--ui-surface-soft); color: var(--ui-text); font-size: .75rem; cursor: pointer; }
++.feed-reaction-detail summary::-webkit-details-marker { display: none; }
++.feed-reaction-detail > div { position: absolute; z-index: 3; bottom: calc(100% + 6px); left: 0; display: grid; gap: 4px; min-width: 145px; max-height: 150px; overflow: auto; padding: 9px; border: 1px solid var(--ui-border); border-radius: 12px; background: var(--ui-surface); color: var(--ui-text); box-shadow: var(--ui-shadow); font-size: .75rem; }
++.feed-reaction-control { position: relative; }
++body .feed-reaction-trigger { display: inline-flex; align-items: center; justify-content: center; min-height: 36px; padding: 6px 13px; border: 1px solid var(--ui-border) !important; border-radius: 999px; background: var(--ui-surface) !important; color: var(--ui-text) !important; font-size: .84rem; font-weight: 650; cursor: pointer; }
++body .feed-reaction-trigger:hover, body .feed-reaction-trigger.active { border-color: var(--ui-blue) !important; background: var(--ui-blue-soft) !important; color: var(--ui-blue) !important; }
++.feed-reaction-picker[hidden] { display: none !important; }
++.feed-reaction-picker { position: absolute; z-index: 5; bottom: calc(100% + 9px); left: 0; display: grid; grid-template-columns: repeat(4, minmax(64px, 1fr)); gap: 5px; width: min(360px, calc(100vw - 44px)); padding: 9px; border: 1px solid var(--ui-border); border-radius: 15px; background: var(--ui-surface); box-shadow: 0 12px 32px rgba(30,41,59,.18); }
++body .feed-reaction-option { display: grid; justify-items: center; gap: 2px; min-width: 0; min-height: 54px; padding: 5px 3px; border: 1px solid transparent !important; border-radius: 10px; background: var(--ui-surface-soft) !important; color: var(--ui-text) !important; cursor: pointer; }
++body .feed-reaction-option > span { font-size: .61rem; line-height: 1.1; }
++body .feed-reaction-option:hover, body .feed-reaction-option.active { border-color: var(--ui-blue) !important; background: var(--ui-blue) !important; color: #fff !important; }
++body .feed-reaction-option:disabled { opacity: .6; }
++@media (max-width: 520px) {
++  .feed-reaction-picker { grid-template-columns: repeat(3, minmax(58px, 1fr)); }
++  .feed-reaction-trigger { min-height: 40px; }
++}
++
+ /* Updates stories and full-screen viewer */
+ .status-page .status-column { max-width: 900px; }
+ .updates-circles {
+diff --git a/templates/home.html b/templates/home.html
+index 6fcdfc8..4ed4f3d 100644
+--- a/templates/home.html
++++ b/templates/home.html
+@@ -33,8 +33,22 @@
+             <header class="feed-post-header"><a class="feed-author" href="/profile/{{ author.id }}"><span class="feed-avatar">{% if can_view_profile_picture(author) %}<img src="/avatar/{{ author.id }}" alt="">{% else %}{{ author.username[0].upper() }}{% endif %}</span><span><strong>{{ author.username }}</strong><time>{{ post.created_at.strftime('%b %d · %H:%M') }} UTC</time></span></a>{% if author.id == current_user.id %}<form method="POST" action="/posts/{{ post.id }}/delete" onsubmit="return confirm('Delete this post?')"><button class="feed-delete" type="submit" aria-label="Delete post">•••</button></form>{% endif %}</header>
+             {% if post.content %}<p class="feed-post-content">{{ post.content }}</p>{% endif %}
+             {% if post.media_url %}{% if post.media_type == 'image' %}<img class="feed-post-media" src="{{ post.media_url }}" alt="Photo shared by {{ author.username }}">{% elif post.media_type == 'video' %}<video class="feed-post-media" src="{{ post.media_url }}" controls playsinline></video>{% endif %}{% endif %}
+-            <div class="feed-post-stats"><span>❤️ {{ item.reaction_counts.love }}　👍 {{ item.reaction_counts.like }}　😂 {{ item.reaction_counts.laugh }}</span><span>{{ item.comments|length }} comments</span></div>
+-            <div class="feed-post-actions">{% for reaction, label, emoji in [('like','Like','👍'),('love','Love','❤️'),('laugh','Laugh','😂')] %}<form method="POST" action="/posts/{{ post.id }}/react"><input type="hidden" name="reaction" value="{{ reaction }}"><button class="feed-reaction{% if item.my_reaction == reaction %} active{% endif %}" type="submit">{{ emoji }} {{ label }}</button></form>{% endfor %}</div>
++            <div class="feed-post-stats"><span class="feed-reaction-total" aria-live="polite"><strong data-reaction-total>{{ item.reaction_total }}</strong> <span>reactions</span></span><span>{{ item.comments|length }} comments</span></div>
++            <div class="feed-reaction-breakdown" data-reaction-breakdown aria-label="Post reactions">
++                {% for reaction, label, emoji in feed_reaction_options if item.reaction_counts[reaction] %}
++                <details class="feed-reaction-detail"><summary aria-label="{{ item.reaction_counts[reaction] }} {{ label }} reactions">{{ emoji }} <span>{{ item.reaction_counts[reaction] }}</span></summary><div>{% for username in item.reaction_people[reaction] %}<span>{{ username }}</span>{% endfor %}</div></details>
++                {% endfor %}
++            </div>
++            <div class="feed-post-actions">
++                <div class="feed-reaction-control">
++                    <button type="button" class="feed-reaction-trigger{% if item.my_reaction %} active{% endif %}" aria-expanded="false" aria-haspopup="true" data-reaction-trigger>
++                        <span data-current-reaction>{% if item.my_reaction %}{% for reaction, label, emoji in feed_reaction_options if reaction == item.my_reaction %}{{ emoji }} {{ label }}{% endfor %}{% else %}☺ React{% endif %}</span>
++                    </button>
++                    <div class="feed-reaction-picker" data-reaction-picker hidden role="group" aria-label="Choose a reaction">
++                        {% for reaction, label, emoji in feed_reaction_options %}<button type="button" class="feed-reaction-option{% if item.my_reaction == reaction %} active{% endif %}" data-reaction="{{ reaction }}" aria-label="{{ label }}" title="{{ label }}">{{ emoji }}<span>{{ label }}</span></button>{% endfor %}
++                    </div>
++                </div>
++            </div>
+             <div class="feed-comments">{% for comment, commenter in item.comments %}<p><strong>{{ commenter.username }}</strong> {{ comment.content }}</p>{% endfor %}</div>
+             <form class="feed-comment-form" method="POST" action="/posts/{{ post.id }}/comment"><input name="content" maxlength="1000" placeholder="Write a comment…" aria-label="Write a comment" required><button type="submit">Comment</button></form>
+         </article>
+@@ -54,5 +68,65 @@ document.getElementById("create-post-button").addEventListener("click", () => {
+ document.querySelector("#feed-composer textarea").addEventListener("focus", () => {
+     document.getElementById("feed-composer").classList.add("is-open");
+ });
++
++const feedReactionOptions = {{ feed_reaction_options|tojson }};
++function renderPostReactionSummary(post, result) {
++    post.querySelector("[data-reaction-total]").textContent = result.reaction_total;
++    const breakdown = post.querySelector("[data-reaction-breakdown]");
++    breakdown.replaceChildren();
++    feedReactionOptions.forEach(([key, label, emoji]) => {
++        const count = result.reaction_counts[key] || 0;
++        if (!count) return;
++        const details = document.createElement("details"); details.className = "feed-reaction-detail";
++        const summary = document.createElement("summary"); summary.setAttribute("aria-label", `${count} ${label} reactions`);
++        summary.textContent = `${emoji} ${count}`; details.appendChild(summary);
++        const names = document.createElement("div");
++        (result.reaction_people[key] || []).forEach((username) => {
++            const name = document.createElement("span"); name.textContent = username; names.appendChild(name);
++        });
++        details.appendChild(names); breakdown.appendChild(details);
++    });
++}
++
++document.querySelectorAll("[data-reaction-trigger]").forEach((trigger) => {
++    const post = trigger.closest(".feed-post");
++    const picker = post.querySelector("[data-reaction-picker]");
++    trigger.addEventListener("click", () => {
++        const open = picker.hidden;
++        document.querySelectorAll("[data-reaction-picker]").forEach((other) => { other.hidden = true; other.closest(".feed-post").querySelector("[data-reaction-trigger]").setAttribute("aria-expanded", "false"); });
++        picker.hidden = !open; trigger.setAttribute("aria-expanded", String(open));
++    });
++    picker.addEventListener("click", async (event) => {
++        const choice = event.target.closest("[data-reaction]"); if (!choice) return;
++        choice.disabled = true;
++        try {
++            const response = await fetch(`/posts/${post.id.replace("post-", "")}/react`, {
++                method: "POST", headers: {"Content-Type": "application/json"},
++                body: JSON.stringify({reaction: choice.dataset.reaction})
++            });
++            const result = await response.json();
++            if (!response.ok) { window.alert(result.error || "Your reaction could not be saved."); return; }
++            const selected = feedReactionOptions.find(([key]) => key === result.my_reaction);
++            post.querySelector("[data-current-reaction]").textContent = selected ? `${selected[2]} ${selected[1]}` : "☺ React";
++            trigger.classList.toggle("active", Boolean(result.my_reaction));
++            picker.querySelectorAll("[data-reaction]").forEach((button) => button.classList.toggle("active", button.dataset.reaction === result.my_reaction));
++            renderPostReactionSummary(post, result);
++            picker.hidden = true; trigger.setAttribute("aria-expanded", "false");
++        } catch (_) { window.alert("Your reaction could not be saved. Check your connection and try again."); }
++        finally { choice.disabled = false; }
++    });
++});
++document.addEventListener("click", (event) => {
++    if (event.target.closest(".feed-reaction-control")) return;
++    document.querySelectorAll("[data-reaction-picker]:not([hidden])").forEach((picker) => {
++        picker.hidden = true; picker.closest(".feed-post").querySelector("[data-reaction-trigger]").setAttribute("aria-expanded", "false");
++    });
++});
++document.addEventListener("keydown", (event) => {
++    if (event.key !== "Escape") return;
++    document.querySelectorAll("[data-reaction-picker]:not([hidden])").forEach((picker) => {
++        picker.hidden = true; picker.closest(".feed-post").querySelector("[data-reaction-trigger]").setAttribute("aria-expanded", "false");
++    });
++});
+ </script>
+ {% endblock %}
