@@ -14,7 +14,7 @@ from flask import (
     Flask, render_template, request, redirect, session, flash, abort, url_for, jsonify, send_from_directory
 )
 from flask_sqlalchemy import SQLAlchemy
-from sqlalchemy import func, inspect, text, update
+from sqlalchemy import func, inspect, or_, text, update
 from sqlalchemy.exc import IntegrityError
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -135,6 +135,7 @@ class User(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(50), unique=True, nullable=False)
     email = db.Column(db.String(254), unique=True, nullable=True)
+    discoverable_by_email = db.Column(db.Boolean, nullable=True, default=True)
     password = db.Column(db.String(200), nullable=False)
 
     avatar_url = db.Column(db.String(255), nullable=True)
@@ -1452,8 +1453,10 @@ def people_directory_context(uid):
     people_friends = User.query.filter(User.id.in_(ids)).order_by(User.username).all() if ids else []
     block_rows = UserBlock.query.filter((UserBlock.blocker_id == uid) | (UserBlock.blocked_id == uid)).all()
     hidden_account_ids = {row.blocker_id if row.blocked_id == uid else row.blocked_id for row in block_rows}
-    accounts = [account for account in User.query.filter(User.id != uid).order_by(User.username).all()
-                if account.id not in hidden_account_ids]
+    accounts = [account for account in User.query.filter(
+        User.id != uid,
+        or_(User.discoverable_by_email.is_(True), User.discoverable_by_email.is_(None)),
+    ).order_by(User.username).all() if account.id not in hidden_account_ids]
     discover_accounts = [account for account in accounts if account.id not in set(ids)]
     incoming_adds = Friendship.query.filter_by(friend_id=uid, status="pending").all()
     incoming_ids = [row.user_id for row in incoming_adds]
@@ -1490,6 +1493,51 @@ def people():
     )
 
 
+@app.route("/people/search", methods=["POST"])
+def search_people_by_email():
+    """Find one discoverable account by its exact registered email, without returning that email."""
+    uid = session.get("user_id")
+    if uid is None:
+        return jsonify(ok=False, error="Please sign in to search for people."), 401
+
+    data = request.get_json(silent=True) or request.form
+    email = (data.get("email") or "").strip().lower()
+    if not valid_email(email):
+        return jsonify(ok=False, error="Enter a valid email address."), 400
+
+    matches = User.query.filter(func.lower(User.email) == email).limit(2).all()
+    if len(matches) != 1:
+        return jsonify(ok=False, error="No discoverable account matched that email address."), 404
+    person = matches[0]
+    if person.id == uid:
+        return jsonify(ok=False, error="You cannot add yourself as a friend."), 400
+    if person.discoverable_by_email is False or is_blocked(uid, person.id):
+        return jsonify(ok=False, error="No discoverable account matched that email address."), 404
+
+    existing = Friendship.query.filter(
+        ((Friendship.user_id == uid) & (Friendship.friend_id == person.id)) |
+        ((Friendship.user_id == person.id) & (Friendship.friend_id == uid))
+    ).first()
+    state = "available"
+    if are_friends(uid, person.id):
+        state = "friends"
+    elif existing and existing.status == "pending":
+        state = "request_sent" if existing.user_id == uid else "request_received"
+
+    response = jsonify(
+        ok=True,
+        person={
+            "id": person.id,
+            "username": person.username,
+            "avatar_url": url_for("user_avatar", user_id=person.id) if can_view_profile_picture(person) else None,
+            "state": state,
+        },
+    )
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["Vary"] = "Cookie"
+    return response
+
+
 @app.route("/explore")
 def explore():
     if "user_id" not in session:
@@ -1510,13 +1558,13 @@ def add_friend():
         return redirect("/login")
 
     uid = session["user_id"]
-    username = (request.form.get("username") or "").strip()
-
-    if not username:
-        flash("Enter a username", "error")
+    email = (request.form.get("email") or "").strip().lower()
+    if not valid_email(email):
+        flash("Enter a valid email address", "error")
         return friend_action_redirect()
 
-    other = User.query.filter(func.lower(User.username) == username.lower()).first()
+    matching_accounts = User.query.filter(func.lower(User.email) == email).limit(2).all()
+    other = matching_accounts[0] if len(matching_accounts) == 1 else None
     existing = None
     if other is not None and other.id != uid:
         existing = Friendship.query.filter(
@@ -1524,12 +1572,10 @@ def add_friend():
             ((Friendship.user_id == other.id) & (Friendship.friend_id == uid))
         ).first()
 
-    if other is None:
-        flash("No user with that name", "error")
-    elif other.id == uid:
+    if other is not None and other.id == uid:
         flash("You cannot add yourself", "error")
-    elif is_blocked(uid, other.id):
-        flash("You cannot add this person while either account has blocked the other", "error")
+    elif other is None or other.discoverable_by_email is False or is_blocked(uid, other.id):
+        flash("No discoverable account matched that email address", "error")
     elif are_friends(uid, other.id):
         flash(f"{other.username} is already a friend", "error")
     elif existing and existing.status == "pending":
@@ -2211,6 +2257,7 @@ def settings():
             else:
                 user.allow_messages_from = messages_from
                 user.avatar_visibility = avatar_visibility
+                user.discoverable_by_email = request.form.get("discoverable_by_email") == "on"
                 user.show_birthday = request.form.get("show_birthday") == "on"
                 db.session.commit()
                 flash("Privacy choices saved.", "success")

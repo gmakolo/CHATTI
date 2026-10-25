@@ -22,6 +22,7 @@
             </div>
             <div class="status-media-picker">
                 <button type="button" id="status-media-button">＋ Add photo, video, or audio</button>
+                <button type="button" id="status-camera-button">▣ Open camera</button>
                 <span id="status-media-name">JPG, PNG, GIF, WebP, MP4, WebM, MP3, M4A, OGG, or WAV · up to 25 MB</span>
                 <input type="file" id="status-media-input" name="media_files" multiple
                        accept="image/png,image/jpeg,image/gif,image/webp,video/mp4,video/webm,audio/mpeg,audio/mp4,audio/ogg,audio/wav,audio/x-wav,audio/webm" hidden>
@@ -114,6 +115,52 @@
     </section>
 </main>
 
+<dialog class="status-camera-dialog" id="status-camera-dialog" aria-labelledby="status-camera-title">
+    <section class="status-camera-shell">
+        <header class="status-camera-header">
+            <div><h2 id="status-camera-title">Create a photo update</h2><p>Capture or choose a photo, then preview your edits.</p></div>
+            <button type="button" id="status-camera-close" aria-label="Close camera">×</button>
+        </header>
+        <div class="status-camera-stage" id="status-camera-stage">
+            <video id="status-camera-video" autoplay muted playsinline hidden></video>
+            <canvas id="status-camera-canvas" hidden aria-label="Edited photo preview"></canvas>
+            <p id="status-camera-message" role="status">Choose Open camera or select a photo from your gallery.</p>
+        </div>
+        <div class="status-camera-actions">
+            <button type="button" id="status-camera-switch" hidden>Switch camera</button>
+            <button type="button" id="status-camera-capture" hidden>Take photo</button>
+            <button type="button" id="status-camera-gallery">Choose from gallery</button>
+        </div>
+        <section class="status-camera-editor" id="status-camera-editor" hidden>
+            <fieldset class="status-camera-filters"><legend>Filters</legend>
+                {% for key, label in [('natural','Natural'),('mono','Black and White'),('vintage','Vintage'),('warm','Warm'),('cool','Cool'),('golden','Golden Glow'),('soft-pink','Soft Pink'),('purple','Purple Glow'),('bright','Bright'),('dreamy','Dreamy')] %}
+                <button type="button" class="status-camera-filter{% if key == 'natural' %} active{% endif %}" data-photo-filter="{{ key }}">{{ label }}</button>
+                {% endfor %}
+            </fieldset>
+            <div class="status-camera-adjustments">
+                <label>Brightness <input type="range" id="status-camera-brightness" min="60" max="150" value="100"></label>
+                <label>Contrast <input type="range" id="status-camera-contrast" min="60" max="150" value="100"></label>
+                <label>Crop <select id="status-camera-crop"><option value="original">Original</option><option value="square">Square</option><option value="portrait">Portrait</option><option value="landscape">Landscape</option></select></label>
+                <button type="button" id="status-camera-rotate">↻ Rotate</button>
+                <button type="button" id="status-camera-reset">Reset edits</button>
+            </div>
+            <div class="status-camera-text-tools">
+                <label>Text or emoji <input id="status-camera-overlay" maxlength="90" placeholder="Add a note or emoji"></label>
+                <label>Text colour <select id="status-camera-text-color"><option value="#FFFFFF">White</option><option value="#211936">Violet</option><option value="#A78BFA">Lavender</option><option value="#F8BBD0">Soft pink</option></select></label>
+                <label>Style <select id="status-camera-text-style"><option value="600 28px Poppins, sans-serif">Clean</option><option value="800 30px Poppins, sans-serif">Bold</option><option value="600 30px Georgia, serif">Serif</option></select></label>
+                <label>Horizontal position <input type="range" id="status-camera-text-x" min="5" max="95" value="50"></label>
+                <label>Vertical position <input type="range" id="status-camera-text-y" min="5" max="95" value="82"></label>
+                <label>Text size <input type="range" id="status-camera-text-size" min="16" max="64" value="28"></label>
+                <small>Drag the text on the preview to move it.</small>
+            </div>
+        </section>
+        <footer class="status-camera-footer">
+            <span id="status-camera-error" role="alert"></span>
+            <div><button type="button" id="status-camera-cancel">Cancel</button><button type="button" id="status-camera-use" disabled>Use this photo</button></div>
+        </footer>
+    </section>
+</dialog>
+
 <script type="application/json" id="updates-story-data">{{ viewer_stories|tojson }}</script>
 <div class="updates-viewer" id="updates-viewer" role="dialog" aria-modal="true" aria-label="Update" hidden>
     <button type="button" class="updates-viewer-nav previous" id="updates-viewer-previous" aria-label="Previous update">‹</button>
@@ -163,9 +210,161 @@ const statusPollOptions = document.getElementById("status-poll-options");
 const statusPollAddOption = document.getElementById("status-poll-add-option");
 const statusAudienceSelect = document.getElementById("status-audience");
 const statusSelectedFriends = document.getElementById("status-audience-selected");
+const cameraDialog = document.getElementById("status-camera-dialog");
+const cameraVideo = document.getElementById("status-camera-video");
+const cameraCanvas = document.getElementById("status-camera-canvas");
+const cameraContext = cameraCanvas.getContext("2d");
+const cameraMessage = document.getElementById("status-camera-message");
+const cameraError = document.getElementById("status-camera-error");
+const cameraEditor = document.getElementById("status-camera-editor");
+const cameraUseButton = document.getElementById("status-camera-use");
 let statusPreviewUrls = [];
 let lastStatusCursorStart = 0;
 let lastStatusCursorEnd = 0;
+let cameraStream = null;
+let cameraFacing = "environment";
+let photoSource = null;
+let sourceWidth = 0;
+let sourceHeight = 0;
+let sourceFileName = "chatti-update.png";
+let sourceFile = null;
+let photoRotation = 0;
+let photoFilter = "natural";
+let activeOverlayDrag = false;
+let skipNextMediaEdit = false;
+const photoFilters = {
+    natural: "none", mono: "grayscale(1)", vintage: "sepia(.5) contrast(.92)",
+    warm: "sepia(.18) saturate(1.25)", cool: "hue-rotate(18deg) saturate(.92)",
+    golden: "sepia(.22) saturate(1.3) brightness(1.08)",
+    "soft-pink": "sepia(.12) hue-rotate(320deg) saturate(1.15)",
+    purple: "hue-rotate(265deg) saturate(1.1)", bright: "brightness(1.14) contrast(1.06)",
+    dreamy: "brightness(1.08) saturate(.82) blur(.25px)"
+};
+
+function stopCamera() {
+    cameraStream?.getTracks().forEach((track) => track.stop());
+    cameraStream = null;
+    cameraVideo.srcObject = null;
+}
+function showCameraDialog() {
+    if (typeof cameraDialog.showModal === "function") cameraDialog.showModal();
+    else cameraDialog.setAttribute("open", "");
+}
+async function startStatusCamera() {
+    showCameraDialog();
+    cameraError.textContent = "";
+    if (!navigator.mediaDevices?.getUserMedia) {
+        cameraMessage.textContent = "Camera access is not supported here. Choose a photo from your gallery instead.";
+        cameraError.textContent = "This browser or connection does not support camera access.";
+        return;
+    }
+    stopCamera();
+    try {
+        cameraStream = await navigator.mediaDevices.getUserMedia({video: {facingMode: {ideal: cameraFacing}}, audio: false});
+        cameraVideo.srcObject = cameraStream;
+        cameraVideo.hidden = false;
+        cameraCanvas.hidden = true;
+        cameraMessage.hidden = true;
+        document.getElementById("status-camera-capture").hidden = false;
+        document.getElementById("status-camera-switch").hidden = false;
+        await cameraVideo.play();
+        cameraVideo.style.filter = `${photoFilters[photoFilter]} brightness(${document.getElementById("status-camera-brightness").value}%) contrast(${document.getElementById("status-camera-contrast").value}%)`;
+    } catch (error) {
+        cameraMessage.hidden = false;
+        cameraMessage.textContent = "Camera permission was denied or no camera is available. Choose a photo from your gallery instead.";
+        cameraError.textContent = error?.name === "NotAllowedError" ? "Allow camera access in your browser settings, or select a gallery photo." : "CHATTI could not open a camera on this device.";
+    }
+}
+function currentCrop() {
+    const mode = document.getElementById("status-camera-crop").value;
+    let aspect = sourceWidth / Math.max(1, sourceHeight);
+    if (mode === "square") aspect = 1;
+    if (mode === "portrait") aspect = 4 / 5;
+    if (mode === "landscape") aspect = 16 / 9;
+    let width = sourceWidth, height = sourceHeight;
+    if (width / height > aspect) width = height * aspect;
+    else height = width / aspect;
+    return {x: (sourceWidth - width) / 2, y: (sourceHeight - height) / 2, width, height};
+}
+function drawEditedPhoto() {
+    if (!photoSource || !sourceWidth || !sourceHeight) return;
+    const crop = currentCrop();
+    const rotated = photoRotation % 180 !== 0;
+    cameraCanvas.width = Math.max(1, Math.round(rotated ? crop.height : crop.width));
+    cameraCanvas.height = Math.max(1, Math.round(rotated ? crop.width : crop.height));
+    cameraContext.save();
+    cameraContext.translate(cameraCanvas.width / 2, cameraCanvas.height / 2);
+    cameraContext.rotate(photoRotation * Math.PI / 180);
+    cameraContext.filter = `${photoFilters[photoFilter]} brightness(${document.getElementById("status-camera-brightness").value}%) contrast(${document.getElementById("status-camera-contrast").value}%)`;
+    cameraContext.drawImage(photoSource, crop.x, crop.y, crop.width, crop.height, -crop.width / 2, -crop.height / 2, crop.width, crop.height);
+    cameraContext.restore();
+    const text = document.getElementById("status-camera-overlay").value.trim();
+    if (text) {
+        const x = cameraCanvas.width * Number(document.getElementById("status-camera-text-x").value) / 100;
+        const y = cameraCanvas.height * Number(document.getElementById("status-camera-text-y").value) / 100;
+        const fontSize = Number(document.getElementById("status-camera-text-size").value);
+        const style = document.getElementById("status-camera-text-style").value;
+        cameraContext.save();
+        cameraContext.filter = "none";
+        cameraContext.font = style.replace(/\d+px/, `${fontSize}px`);
+        cameraContext.textAlign = "center";
+        cameraContext.textBaseline = "middle";
+        cameraContext.lineWidth = Math.max(2, fontSize / 9);
+        cameraContext.strokeStyle = "rgba(18, 12, 30, .7)";
+        cameraContext.fillStyle = document.getElementById("status-camera-text-color").value;
+        cameraContext.strokeText(text, x, y, cameraCanvas.width * .9);
+        cameraContext.fillText(text, x, y, cameraCanvas.width * .9);
+        cameraContext.restore();
+    }
+    cameraVideo.hidden = true;
+    cameraCanvas.hidden = false;
+    cameraMessage.hidden = true;
+    cameraEditor.hidden = false;
+    cameraUseButton.disabled = false;
+}
+function setEditorSource(source, width, height, filename, file = null) {
+    photoSource = source; sourceWidth = width; sourceHeight = height;
+    sourceFileName = filename || "chatti-update.png";
+    sourceFile = file;
+    photoRotation = 0; photoFilter = "natural";
+    document.getElementById("status-camera-brightness").value = "100";
+    document.getElementById("status-camera-contrast").value = "100";
+    document.getElementById("status-camera-crop").value = "original";
+    document.getElementById("status-camera-overlay").value = "";
+    document.querySelectorAll("[data-photo-filter]").forEach((button) => button.classList.toggle("active", button.dataset.photoFilter === photoFilter));
+    drawEditedPhoto();
+}
+function openGalleryPhoto(file) {
+    showCameraDialog();
+    cameraError.textContent = "";
+    stopCamera();
+    cameraVideo.hidden = true;
+    document.getElementById("status-camera-capture").hidden = true;
+    document.getElementById("status-camera-switch").hidden = true;
+    const image = new Image();
+    image.onload = () => setEditorSource(image, image.naturalWidth, image.naturalHeight, file.name, file);
+    image.onerror = () => { cameraError.textContent = "CHATTI could not read that image. Choose another photo."; };
+    image.src = URL.createObjectURL(file);
+}
+async function addEditedPhotoToUpdate() {
+    if (!photoSource) return;
+    const blob = await new Promise((resolve) => cameraCanvas.toBlob(resolve, "image/png"));
+    if (!blob) { cameraError.textContent = "Could not prepare the edited photo. Please try again."; return; }
+    const output = new File([blob], `chatti-edited-${Date.now()}.png`, {type: "image/png", lastModified: Date.now()});
+    const previous = Array.from(statusMediaInput.files || []);
+    const editingGalleryFile = sourceFile ? previous.indexOf(sourceFile) : -1;
+    if (editingGalleryFile >= 0) previous[editingGalleryFile] = output;
+    else previous.push(output);
+    if (previous.length > 10) { cameraError.textContent = "You can share up to 10 items in one update."; return; }
+    const transfer = new DataTransfer();
+    previous.forEach((file) => transfer.items.add(file));
+    statusMediaInput.files = transfer.files;
+    stopCamera();
+    cameraDialog.close?.();
+    cameraDialog.removeAttribute("open");
+    skipNextMediaEdit = true;
+    statusMediaInput.dispatchEvent(new Event("change", {bubbles: true}));
+}
 function syncStatusAudience() {
     statusSelectedFriends.hidden = statusAudienceSelect.value !== "selected";
 }
@@ -471,15 +670,61 @@ document.getElementById("empty-add-status-button")?.addEventListener("click", op
 document.getElementById("my-update-add-button")?.addEventListener("click", openStatusComposer);
 document.getElementById("cancel-status-button").addEventListener("click", closeStatusComposer);
 document.getElementById("status-media-button").addEventListener("click", () => statusMediaInput.click());
-statusMediaInput.addEventListener("change", () => {
-    const files = Array.from(statusMediaInput.files || []);
-    if (!files.length) return;
-    if (files.length > 10) {
-        window.alert("You can add up to 10 photos, videos, or audio files at once.");
-        statusMediaInput.value = "";
-        return;
-    }
-
+document.getElementById("status-camera-button").addEventListener("click", startStatusCamera);
+document.getElementById("status-camera-gallery").addEventListener("click", () => statusMediaInput.click());
+document.getElementById("status-camera-switch").addEventListener("click", () => {
+    cameraFacing = cameraFacing === "environment" ? "user" : "environment";
+    startStatusCamera();
+});
+document.getElementById("status-camera-capture").addEventListener("click", async () => {
+    if (!cameraStream || !cameraVideo.videoWidth) return;
+    const capture = document.createElement("canvas");
+    capture.width = cameraVideo.videoWidth; capture.height = cameraVideo.videoHeight;
+    capture.getContext("2d").drawImage(cameraVideo, 0, 0);
+    const blob = await new Promise((resolve) => capture.toBlob(resolve, "image/jpeg", .95));
+    if (!blob) { cameraError.textContent = "CHATTI could not capture that photo. Please try again."; return; }
+    const image = new Image();
+    image.onload = () => setEditorSource(image, image.naturalWidth, image.naturalHeight, "camera-photo.jpg");
+    image.onerror = () => { cameraError.textContent = "CHATTI could not open the captured photo."; };
+    image.src = URL.createObjectURL(blob);
+});
+document.getElementById("status-camera-use").addEventListener("click", addEditedPhotoToUpdate);
+document.getElementById("status-camera-close").addEventListener("click", () => cameraDialog.close?.());
+document.getElementById("status-camera-cancel").addEventListener("click", () => cameraDialog.close?.());
+cameraDialog.addEventListener("close", stopCamera);
+cameraDialog.addEventListener("click", (event) => { if (event.target === cameraDialog) cameraDialog.close?.(); });
+document.querySelectorAll("[data-photo-filter]").forEach((button) => button.addEventListener("click", () => {
+    photoFilter = button.dataset.photoFilter;
+    document.querySelectorAll("[data-photo-filter]").forEach((item) => item.classList.toggle("active", item === button));
+    if (photoSource) drawEditedPhoto();
+    else if (cameraStream) cameraVideo.style.filter = `${photoFilters[photoFilter]} brightness(${document.getElementById("status-camera-brightness").value}%) contrast(${document.getElementById("status-camera-contrast").value}%)`;
+}));
+["status-camera-brightness", "status-camera-contrast"].forEach((id) => document.getElementById(id).addEventListener("input", () => {
+    if (photoSource) drawEditedPhoto();
+    if (cameraStream) cameraVideo.style.filter = `${photoFilters[photoFilter]} brightness(${document.getElementById("status-camera-brightness").value}%) contrast(${document.getElementById("status-camera-contrast").value}%)`;
+}));
+["status-camera-crop", "status-camera-overlay", "status-camera-text-color", "status-camera-text-style", "status-camera-text-x", "status-camera-text-y", "status-camera-text-size"].forEach((id) => {
+    document.getElementById(id).addEventListener("input", () => { if (photoSource) drawEditedPhoto(); });
+    document.getElementById(id).addEventListener("change", () => { if (photoSource) drawEditedPhoto(); });
+});
+document.getElementById("status-camera-rotate").addEventListener("click", () => { photoRotation = (photoRotation + 90) % 360; if (photoSource) drawEditedPhoto(); });
+document.getElementById("status-camera-reset").addEventListener("click", () => {
+    if (photoSource) setEditorSource(photoSource, sourceWidth, sourceHeight, sourceFileName, sourceFile);
+});
+cameraCanvas.addEventListener("pointerdown", (event) => {
+    if (!document.getElementById("status-camera-overlay").value.trim()) return;
+    activeOverlayDrag = true; cameraCanvas.setPointerCapture(event.pointerId);
+});
+cameraCanvas.addEventListener("pointermove", (event) => {
+    if (!activeOverlayDrag) return;
+    const rect = cameraCanvas.getBoundingClientRect();
+    document.getElementById("status-camera-text-x").value = String(Math.max(5, Math.min(95, (event.clientX - rect.left) / rect.width * 100)));
+    document.getElementById("status-camera-text-y").value = String(Math.max(5, Math.min(95, (event.clientY - rect.top) / rect.height * 100)));
+    drawEditedPhoto();
+});
+cameraCanvas.addEventListener("pointerup", () => { activeOverlayDrag = false; });
+cameraCanvas.addEventListener("pointercancel", () => { activeOverlayDrag = false; });
+function renderSelectedStatusMedia(files) {
     document.getElementById("status-media-name").textContent = files.length === 1 ? files[0].name : `${files.length} items selected`;
     statusPreviewUrls.forEach((url) => URL.revokeObjectURL(url));
     statusPreviewUrls = [];
@@ -499,6 +744,28 @@ statusMediaInput.addEventListener("change", () => {
     statusMediaPreview.hidden = false;
     statusTextarea.placeholder = "Add a caption...";
     statusTextarea.focus();
+}
+statusMediaInput.addEventListener("change", () => {
+    const files = Array.from(statusMediaInput.files || []);
+    if (!files.length) return;
+    if (files.length > 10) {
+        window.alert("You can add up to 10 photos, videos, or audio files at once.");
+        statusMediaInput.value = "";
+        return;
+    }
+    if (skipNextMediaEdit) skipNextMediaEdit = false;
+    else {
+        const firstImage = files.find((file) => file.type.startsWith("image/"));
+        if (firstImage) { renderSelectedStatusMedia(files); openGalleryPhoto(firstImage); return; }
+    }
+    renderSelectedStatusMedia(files);
+});
+
+let statusSubmitting = false;
+statusComposer.addEventListener("submit", (event) => {
+    if (statusSubmitting) { event.preventDefault(); return; }
+    statusSubmitting = true;
+    statusComposer.querySelector('button[type="submit"]').disabled = true;
 });
 
 statusEmojiToggle.addEventListener("click", () => {

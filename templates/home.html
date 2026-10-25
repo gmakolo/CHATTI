@@ -69,12 +69,15 @@
                 {% endfor %}
             </div>
             <div class="feed-post-actions">
-                <div class="feed-reaction-control">
-                    <button type="button" class="feed-reaction-trigger{% if item.my_reaction %} active{% endif %}" aria-expanded="false" aria-haspopup="true" data-reaction-trigger>
-                        <span data-current-reaction>{% if item.my_reaction %}{% for reaction, label, emoji in feed_reaction_options if reaction == item.my_reaction %}{{ emoji }} {{ label }}{% endfor %}{% else %}☺ React{% endif %}</span>
-                    </button>
+                <div class="feed-reaction-control" aria-label="React to this post">
+                    <div class="feed-reaction-quick" role="group" aria-label="Quick reactions">
+                        {% for reaction, label, emoji in feed_reaction_options[:6] %}
+                        <button type="button" class="feed-reaction-quick-option{% if item.my_reaction == reaction %} active{% endif %}" data-reaction="{{ reaction }}" aria-label="{{ label }}" title="{{ label }}" aria-pressed="{{ 'true' if item.my_reaction == reaction else 'false' }}">{{ emoji }}</button>
+                        {% endfor %}
+                    </div>
+                    <button type="button" class="feed-reaction-more" aria-expanded="false" aria-haspopup="true" data-reaction-trigger aria-label="More reactions" title="More reactions">+</button>
                     <div class="feed-reaction-picker" data-reaction-picker hidden role="group" aria-label="Choose a reaction">
-                        {% for reaction, label, emoji in feed_reaction_options %}<button type="button" class="feed-reaction-option{% if item.my_reaction == reaction %} active{% endif %}" data-reaction="{{ reaction }}" aria-label="{{ label }}" title="{{ label }}">{{ emoji }}<span>{{ label }}</span></button>{% endfor %}
+                        {% for reaction, label, emoji in feed_reaction_options %}<button type="button" class="feed-reaction-option{% if item.my_reaction == reaction %} active{% endif %}" data-reaction="{{ reaction }}" aria-label="{{ label }}" title="{{ label }}" aria-pressed="{{ 'true' if item.my_reaction == reaction else 'false' }}">{{ emoji }}<span>{{ label }}</span></button>{% endfor %}
                     </div>
                 </div>
             </div>
@@ -178,6 +181,30 @@ function renderPostReactionSummary(post, result) {
     });
 }
 
+async function savePostReaction(post, button, trigger) {
+    const reaction = button.dataset.reaction;
+    const controls = post.querySelectorAll("[data-reaction]");
+    controls.forEach((item) => { item.disabled = true; });
+    try {
+        const response = await fetch(`/posts/${post.id.replace("post-", "")}/react`, {
+            method: "POST", headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({reaction})
+        });
+        const result = await response.json();
+        if (!response.ok) { window.alert(result.error || "Your reaction could not be saved."); return; }
+        renderPostReactionSummary(post, result);
+        post.querySelectorAll("[data-reaction]").forEach((item) => {
+            const active = item.dataset.reaction === result.my_reaction;
+            item.classList.toggle("active", active);
+            item.setAttribute("aria-pressed", String(active));
+        });
+        const picker = post.querySelector("[data-reaction-picker]");
+        picker.hidden = true;
+        trigger.setAttribute("aria-expanded", "false");
+    } catch (_) { window.alert("Your reaction could not be saved. Check your connection and try again."); }
+    finally { controls.forEach((item) => { item.disabled = false; }); }
+}
+
 document.querySelectorAll("[data-reaction-trigger]").forEach((trigger) => {
     const post = trigger.closest(".feed-post");
     const picker = post.querySelector("[data-reaction-picker]");
@@ -188,23 +215,9 @@ document.querySelectorAll("[data-reaction-trigger]").forEach((trigger) => {
     });
     picker.addEventListener("click", async (event) => {
         const choice = event.target.closest("[data-reaction]"); if (!choice) return;
-        choice.disabled = true;
-        try {
-            const response = await fetch(`/posts/${post.id.replace("post-", "")}/react`, {
-                method: "POST", headers: {"Content-Type": "application/json"},
-                body: JSON.stringify({reaction: choice.dataset.reaction})
-            });
-            const result = await response.json();
-            if (!response.ok) { window.alert(result.error || "Your reaction could not be saved."); return; }
-            const selected = feedReactionOptions.find(([key]) => key === result.my_reaction);
-            post.querySelector("[data-current-reaction]").textContent = selected ? `${selected[2]} ${selected[1]}` : "☺ React";
-            trigger.classList.toggle("active", Boolean(result.my_reaction));
-            picker.querySelectorAll("[data-reaction]").forEach((button) => button.classList.toggle("active", button.dataset.reaction === result.my_reaction));
-            renderPostReactionSummary(post, result);
-            picker.hidden = true; trigger.setAttribute("aria-expanded", "false");
-        } catch (_) { window.alert("Your reaction could not be saved. Check your connection and try again."); }
-        finally { choice.disabled = false; }
+        await savePostReaction(post, choice, trigger);
     });
+    post.querySelectorAll(".feed-reaction-quick-option").forEach((button) => button.addEventListener("click", () => savePostReaction(post, button, trigger)));
 });
 document.addEventListener("click", (event) => {
     if (event.target.closest(".feed-reaction-control")) return;

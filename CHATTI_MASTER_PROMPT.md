@@ -525,3 +525,15 @@ Because this is a large upgrade, work in small, tested stages. Do not make all c
 - Keep captions, reactions, comments, and feed layout usable on desktop and mobile.
 - Enforce each post's audience permissions when serving image files.
 - Test single and multiple images, upload byte preservation, viewer navigation, private media access, and responsive styles.
+
+# 27. Find Friends Using Email Address
+
+- Let users find and add friends using an exact registered email address, not a username or phone number.
+- Add a People search field with the placeholder “Search friends by email”.
+- Show the matching profile and an Add Friend action only when that account allows email discovery.
+- Support sending, accepting, rejecting, and cancelling friend requests.
+- Give clear feedback for invalid addresses, undiscoverable or nonexistent accounts, duplicate requests, and existing friendships without leaking private account existence.
+- Never include private email addresses in public profiles or search results.
+- Prevent self-friend requests and enforce validation and privacy on the backend.
+- Preserve existing accounts, friendships, and messages; integrate with the existing People page.
+- Test exact email search, requests, privacy restrictions, and existing friendships.

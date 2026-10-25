@@ -67,6 +67,9 @@
                     <label class="retention-option"><input type="checkbox" name="show_birthday" {% if user.show_birthday %}checked{% endif %}>
                         <span><strong>Show my birthday to friends</strong><small>Your birthday stays private unless you turn this on.</small></span>
                     </label>
+                    <label class="retention-option"><input type="checkbox" name="discoverable_by_email" {% if user.discoverable_by_email is not false %}checked{% endif %}>
+                        <span><strong>Let people find me by email</strong><small>Your email address is never shown in People search or on your profile.</small></span>
+                    </label>
                     <div class="settings-field settings-not-available">
                         <span><strong>Group invitations</strong><small>Group chats aren’t available in CHATTI yet, so there are no group invitations to control.</small></span>
                         <span class="settings-coming-soon">Not available yet</span>

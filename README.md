@@ -86,8 +86,10 @@ Stop it with `Ctrl+C`.
 
 1. Go to `/signup` and create an account with a unique email address and username.
 2. Log in with your email address and password. CHATTI never uses usernames for normal login.
-3. On the **People** page, find someone by their username and send a friend request.
-   (Friendships are one-way rows but work in both directions once added.)
+3. On the **People** page, search for a person using the exact email address they
+   registered with, then send a friend request. Email search can be turned off in
+   Settings, and CHATTI never displays the searched email to other people.
+   (Friendships are one-way rows but work in both directions once accepted.)
 4. Click an accepted friend to open the chat and send messages.
 
 Older accounts without an email can use **Set up an email for an existing account** on the login page. This one-time form verifies the existing username and password, then attaches a unique email to the same account. It does not create a replacement account or remove messages or friendships. Accounts with no username after login are prompted to choose one before using CHATTI.
