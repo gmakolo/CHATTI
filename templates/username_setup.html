@@ -8,10 +8,12 @@
         <form method="POST" class="legacy-account-form">
             <label for="account-username">Username</label>
             <input id="account-username" name="username" minlength="3" maxlength="50"
-                   pattern="[A-Za-z0-9_.]{3,50}" autocomplete="username" required autofocus>
-            <small>Use 3–50 letters, numbers, dots, or underscores.</small>
+                   pattern="[A-Za-z0-9]{3,50}" autocomplete="username" required autofocus>
+            <small>Choose a username using letters and numbers.</small>
+            {% if username_suggestions %}<div class="username-suggestions" aria-label="Available username suggestions">Available suggestions: {% for suggestion in username_suggestions %}<button type="button" data-username-suggestion="{{ suggestion }}">{{ suggestion }}</button>{% endfor %}</div>{% endif %}
             <button type="submit">Save username</button>
         </form>
     </section>
 </main>
 {% endblock %}
+{% block scripts %}<script>document.querySelectorAll('[data-username-suggestion]').forEach(button => button.addEventListener('click', () => { const input = document.querySelector('input[name="username"]'); input.value = button.dataset.usernameSuggestion; input.focus(); }));</script>{% endblock %}

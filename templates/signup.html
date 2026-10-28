@@ -20,10 +20,11 @@
                 autocomplete="username"
                 minlength="3"
                 maxlength="50"
-                pattern="[A-Za-z0-9_.]{3,50}"
+                pattern="[A-Za-z0-9]{3,50}"
                 required
             >
-            <small>Choose a unique username using letters, numbers, dots, or underscores.</small>
+            <small>Choose a username using letters and numbers.</small>
+            {% if username_suggestions %}<div class="username-suggestions" aria-label="Available username suggestions">Available suggestions: {% for suggestion in username_suggestions %}<button type="button" data-username-suggestion="{{ suggestion }}">{{ suggestion }}</button>{% endfor %}</div>{% endif %}
 
             <input
                 type="email"
@@ -56,3 +57,5 @@
 </div>
 
 {% endblock %}
+
+{% block scripts %}<script>document.querySelectorAll('[data-username-suggestion]').forEach(button => button.addEventListener('click', () => { const input = document.querySelector('input[name="username"]'); input.value = button.dataset.usernameSuggestion; input.focus(); }));</script>{% endblock %}

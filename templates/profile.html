@@ -24,15 +24,71 @@
             <span>About me</span>
             <p>{{ user.bio or 'Add a little about yourself.' }}</p>
             {% if user.birthday and (is_owner or user.show_birthday) %}<span>Birthday</span><p>{{ user.birthday.strftime('%B %d, %Y') }}</p>{% endif %}
-            {% if user.gender %}<span>Gender</span><p>{{ user.gender }}</p>{% endif %}
+            {% if is_owner %}{% if user.gender %}<span>Gender</span><p>{{ user.gender }}</p>{% endif %}
             {% if user.location %}<span>Location</span><p>{{ user.location }}</p>{% endif %}
             {% if user.occupation %}<span>Occupation</span><p>{{ user.occupation }}</p>{% endif %}
-            {% if user.interests %}<span>Interests and hobbies</span><p>{{ user.interests }}</p>{% endif %}
+            {% if user.interests %}<span>Interests and hobbies</span><p>{{ user.interests }}</p>{% endif %}{% endif %}
             {% if is_owner %}
             <span class="profile-email-label">Email address</span>
             <p>{{ user.email or 'Add an email address so you can recover your password.' }}</p>
             {% endif %}
         </div>
+
+        {% if not is_owner %}
+        <div class="profile-connection-actions" aria-label="Friendship controls">
+            {% if profile_relationship == 'friends' %}
+            <span class="friend-connected-label">Friends ✓</span>
+            <form method="POST" action="/remove_friend/{{ user.id }}" onsubmit="return confirm('Unfriend {{ user.username }}? Your messages and conversation history will stay saved.')">
+                <input type="hidden" name="return_to" value="/profile/{{ user.id }}"><button type="submit" class="profile-unfriend-button">Unfriend</button>
+            </form>
+            {% elif profile_relationship == 'request_sent' %}
+            <span class="account-already-friend">Friend request sent</span>
+            {% elif profile_relationship == 'request_received' %}
+            <form method="POST" action="/friend_request/{{ profile_friend_request_id }}/accept"><input type="hidden" name="return_to" value="/profile/{{ user.id }}"><button type="submit" class="profile-add-friend-button">Accept friend request</button></form>
+            <form method="POST" action="/friend_request/{{ profile_friend_request_id }}/decline"><input type="hidden" name="return_to" value="/profile/{{ user.id }}"><button type="submit" class="profile-unfriend-button">Decline</button></form>
+            {% elif profile_relationship == 'blocked_by_me' %}
+            <span class="account-already-friend">You blocked this person</span>
+            <form method="POST" action="/settings/unblock/{{ user.id }}" onsubmit="return confirm('Unblock {{ user.username }}?')"><input type="hidden" name="return_to" value="/profile/{{ user.id }}"><button type="submit" class="profile-add-friend-button">Unblock</button></form>
+            {% elif profile_relationship == 'none' %}
+            <form method="POST" action="/add_friend"><input type="hidden" name="user_id" value="{{ user.id }}"><input type="hidden" name="return_to" value="/profile/{{ user.id }}"><button type="submit" class="profile-add-friend-button">Add Friend</button></form>
+            {% endif %}
+        </div>
+        {% endif %}
+
+        {% if can_view_friend_list %}
+        <section class="profile-friendships" aria-label="Friendships">
+            {% if not is_owner %}<p>Friends with {{ user.username }}</p>{% endif %}
+            {% if mutual_friends %}<h2>Mutual friends</h2><ul>{% for person in mutual_friends %}<li><a href="/profile/{{ person.id }}">{{ person.username }}</a></li>{% endfor %}</ul>{% endif %}
+            {% if profile_friends %}<h2>{{ 'Friends' if is_owner else user.username ~ '’s friends' }}</h2><ul>{% for person in profile_friends %}<li><a href="/profile/{{ person.id }}">{{ person.username }}</a></li>{% endfor %}</ul>
+            {% elif is_owner %}<p>You haven’t added any friends yet.</p>{% endif %}
+        </section>
+        {% elif not is_owner %}<p class="profile-friends-private">{{ user.username }} keeps their friend list private.</p>{% endif %}
+
+        {% if back_chat_id %}
+        <section class="profile-shared-history" aria-labelledby="shared-history-title">
+            {% if profile_chat_theme %}<p class="profile-chat-theme">Your chat theme here: <strong>{{ profile_chat_theme }}</strong></p>{% endif %}
+            <h2 id="shared-history-title">Media, Links and Documents</h2>
+            <nav class="profile-media-tabs" aria-label="Shared media filters">
+                <a href="#shared-photos">Photos</a><a href="#shared-videos">Videos</a><a href="#shared-documents">Documents</a><a href="#shared-links">Links</a>
+            </nav>
+            <section id="shared-photos"><h3>Photos</h3><div class="profile-media-grid">
+                {% for item in shared_media.photos %}<a href="{{ item.content }}" target="_blank" rel="noopener"><img src="{{ item.content }}" alt="Shared photo" loading="lazy"></a>{% else %}<p>No shared photos in this conversation.</p>{% endfor %}
+            </div></section>
+            <section id="shared-videos"><h3>Videos</h3>
+                {% for item in shared_media.videos %}<video controls preload="metadata" src="{{ item.content }}">Your browser cannot play this video.</video>{% else %}<p>No shared videos in this conversation.</p>{% endfor %}
+            </section>
+            <section id="shared-documents"><h3>Documents</h3>
+                {% for item in shared_media.documents %}{% if item.content.startswith('/') and not item.content.startswith('//') %}<a href="{{ item.content }}" download>{{ item.content.rsplit('/', 1)[-1] or 'Download document' }}</a>{% else %}<span>{{ item.content.rsplit('/', 1)[-1] or 'Shared document' }}</span>{% endif %}{% else %}<p>No shared documents in this conversation.</p>{% endfor %}
+            </section>
+            <section id="shared-links"><h3>Links</h3>
+                {% for url, item in shared_media.links %}<a href="{{ url }}" target="_blank" rel="noopener noreferrer">{{ url }}</a>{% else %}<p>No links shared in this conversation.</p>{% endfor %}
+            </section>
+            <section class="profile-message-search"><h3>Search chat history</h3>
+                <form method="GET" action="/profile/{{ user.id }}"><input type="hidden" name="from_chat" value="{{ back_chat_id }}"><label for="profile-message-query">Find messages</label><input id="profile-message-query" name="q" type="search" value="{{ message_query }}" placeholder="Search this conversation"><button type="submit">Search</button></form>
+                {% if message_query %}<ol>{% for item in shared_messages %}<li><time>{{ item.timestamp.strftime('%Y-%m-%d %H:%M') if item.timestamp else '' }}</time> {{ 'You' if item.sender_id == session.get('user_id') else user.username }}: {{ item.content }}</li>{% else %}<li>No messages match that search.</li>{% endfor %}</ol>{% endif %}
+            </section>
+        </section>
+        {% endif %}
 
         {% if is_owner %}
         <form method="POST" enctype="multipart/form-data" class="profile-form" id="profile-form" hidden>

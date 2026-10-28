@@ -12,10 +12,11 @@
                 <input type="hidden" name="section" value="appearance">
                 <fieldset>
                     <legend>Appearance</legend>
-                    <p class="settings-help">Dark violet is the default. Your choice is saved to your account.</p>
+                    <p class="settings-help">Choose the appearance used across CHATTI. Your choice is saved to your account.</p>
                     <label class="retention-option"><input type="radio" name="appearance_mode" value="dark" {% if (user.appearance_mode or 'dark') == 'dark' %}checked{% endif %}><span><strong>Dark mode</strong><small>Deep violet background, purple surfaces, and light lavender text.</small></span></label>
                     <label class="retention-option"><input type="radio" name="appearance_mode" value="light" {% if user.appearance_mode == 'light' %}checked{% endif %}><span><strong>Light mode</strong><small>White surfaces with Electric Violet accents.</small></span></label>
                 </fieldset>
+                <button type="button" class="settings-save-button" data-appearance-toggle aria-label="Toggle light or dark mode">Toggle appearance</button>
                 <button type="submit" class="settings-save-button">Save appearance</button>
             </form>
         </section>
@@ -69,6 +70,9 @@
                     </label>
                     <label class="retention-option"><input type="checkbox" name="discoverable_by_email" {% if user.discoverable_by_email is not false %}checked{% endif %}>
                         <span><strong>Let people find me by email</strong><small>Your email address is never shown in People search or on your profile.</small></span>
+                    </label>
+                    <label class="retention-option"><input type="checkbox" name="show_friends" {% if user.show_friends is not false %}checked{% endif %}>
+                        <span><strong>Show my friends on my profile</strong><small>Only accepted friends can view your friend list and mutual friends.</small></span>
                     </label>
                     <div class="settings-field settings-not-available">
                         <span><strong>Group invitations</strong><small>Group chats aren’t available in CHATTI yet, so there are no group invitations to control.</small></span>
@@ -162,7 +166,7 @@
         </section>
 
         <section class="settings-section settings-account-section">
-            <div class="settings-account-actions"><div><h2>Log out</h2><p>Sign out of CHATTI on this device.</p></div><a href="/logout" class="settings-logout-button">Log out</a></div>
+            <div class="settings-account-actions"><div><h2>Log out</h2><p>Sign out of CHATTI on this device.</p></div><a href="/logout" class="settings-logout-button" onclick="return confirm('Log out of CHATTI?')">Log out</a></div>
         </section>
 
         <details class="settings-section settings-delete-section">

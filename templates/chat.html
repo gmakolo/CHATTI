@@ -42,7 +42,7 @@
 
         <div class="container chat-theme-container" id="chat-theme-container"
              data-theme-mode="{{ current_appearance_mode() }}"
-             style="--chat-bg: {{ chat_theme.bg if current_appearance_mode() == 'light' else chat_theme.dark_bg }}; --chat-sent: {{ chat_theme.sent if current_appearance_mode() == 'light' else chat_theme.dark_sent }}; --chat-received: {{ chat_theme.received if current_appearance_mode() == 'light' else chat_theme.dark_received }}; --chat-accent: {{ chat_theme.accent if current_appearance_mode() == 'light' else chat_theme.dark_accent }};">
+             style="--chat-bg: {{ chat_theme.bg if current_appearance_mode() == 'light' else chat_theme.dark_bg }}; --chat-sent: {{ chat_theme.sent if current_appearance_mode() == 'light' else chat_theme.dark_sent }}; --chat-received: {{ chat_theme.received if current_appearance_mode() == 'light' else chat_theme.dark_received }}; --chat-accent: {{ chat_theme.accent if current_appearance_mode() == 'light' else chat_theme.dark_accent }}; --chat-text: {{ chat_theme.get('text', '#34263A') if current_appearance_mode() == 'light' else chat_theme.get('dark_text', '#F4EDF7') }};">
 
             <div class="chat-header">
                 <a href="/friends" class="back-link" title="All chats">&#8249;</a>
@@ -91,6 +91,7 @@
                             data-received="{{ theme.received }}" data-accent="{{ theme.accent }}"
                             data-dark-bg="{{ theme.dark_bg }}" data-dark-sent="{{ theme.dark_sent }}"
                             data-dark-received="{{ theme.dark_received }}" data-dark-accent="{{ theme.dark_accent }}"
+                            data-text="{{ theme.get('text', '') }}" data-dark-text="{{ theme.get('dark_text', '') }}"
                             aria-label="{{ theme.label }} theme" title="{{ theme.label }}">
                         <span class="chat-theme-swatch" style="--swatch-bg: {{ theme.bg }}; --swatch-sent: {{ theme.sent }};"></span>
                         <span>{{ theme.label }}</span>
@@ -117,6 +118,8 @@
                         <span class="bubble-content sticker-render" aria-label="{{ sticker.name if sticker else 'Sticker' }}">
                             {% if sticker and sticker.sticker_type == 'image' %}<img src="{{ sticker.value }}" alt="{{ sticker.name }}" loading="lazy">{% elif sticker %}{{ sticker.value }}{% else %}Sticker unavailable{% endif %}
                         </span>
+                    {% elif m.message_type == 'image' %}<span class="bubble-content"><img class="chat-shared-photo" src="{{ m.content }}" alt="Shared photo" loading="lazy"></span>
+                    {% elif m.message_type == 'poll' %}{% set poll = poll_map.get(m.content|int) %}<div class="bubble-content chat-poll" data-poll-id="{{ poll.id if poll else '' }}"><strong>{{ poll.question if poll else 'Poll unavailable' }}</strong>{% if poll %}{% for option in poll.options %}<button type="button" data-poll-option="{{ option.id }}">{{ option.label }} <span>{{ option.votes }}</span></button>{% endfor %}<small>{{ poll.total }} vote{{ '' if poll.total == 1 else 's' }}</small>{% endif %}</div>
                     {% else %}<span class="bubble-content">{{ m.content }}</span>{% endif %}
                     {% if m.sender_id == current_user_id %}{% if m.read_at and not m.read_receipt_hidden %}<span class="message-receipt seen" title="Read" aria-label="Read">✓✓</span>
                     {% elif m.delivered_at %}<span class="message-receipt delivered" title="Delivered" aria-label="Delivered">✓✓</span>
@@ -142,8 +145,12 @@
                     <button type="button" id="emojiBtn" title="Emoji" aria-label="Choose an emoji" aria-expanded="false" {% if pending_message_remaining == 0 %}disabled{% endif %}>&#128516;</button>
                     <button type="button" id="stickerBtn" title="Stickers" aria-label="Choose a sticker" aria-expanded="false" {% if pending_message_remaining == 0 %}disabled{% endif %}>✿</button>
                 </div>
+                <label class="chat-photo-button" for="chat-photo-file" title="Send a photo">Photo</label>
+                <input type="file" id="chat-photo-file" accept="image/png,image/jpeg,image/gif,image/webp" hidden {% if pending_message_remaining == 0 %}disabled{% endif %}>
+                <button type="button" id="pollBtn" {% if pending_message_remaining == 0 %}disabled{% endif %}>Poll</button>
                 <div class="chat-emoji-picker emoji-searchable-picker" id="chat-emoji-picker" hidden aria-label="Choose an emoji">
                     <input type="search" class="emoji-search" data-emoji-search placeholder="Search emojis..." aria-label="Search emojis">
+                    <nav class="emoji-category-tabs" aria-label="Emoji categories">{% for category in ['Smileys','People','Hearts','Nature','Food','Activities','Objects'] %}<button type="button" data-emoji-category="{{ category }}">{{ category }}</button>{% endfor %}</nav>
                     <div class="chat-emoji-grid">
                         {% for emoji in ['🥰', '🥹', '😍', '😊', '😘', '😂', '❤️', '💖', '💕', '💗', '🦋', '🌸', '🌷', '🐻', '🐰', '🧸', '🍓', '✨', '🎀', '🌈', '☁️', '🌙', '😎', '🤔', '👏', '🎉', '🔥', '🙏', '🙌', '🌿'] %}
                         <button type="button" class="chat-emoji-option" data-emoji-option aria-label="{{ emoji }}">{{ emoji }}</button>
@@ -187,6 +194,7 @@
                        autocomplete="off" maxlength="2000" required {% if pending_message_remaining == 0 %}disabled{% endif %}>
                 <button type="submit" id="sendBtn" {% if pending_message_remaining == 0 %}disabled{% endif %}>Send</button>
             </form>
+            <dialog class="chat-poll-dialog" id="chat-poll-dialog"><form id="chat-poll-form"><h2>Create a poll</h2><label for="chat-poll-question">Question</label><input id="chat-poll-question" maxlength="200" required><div id="chat-poll-options"><input class="chat-poll-option-input" maxlength="100" placeholder="Option 1" required><input class="chat-poll-option-input" maxlength="100" placeholder="Option 2" required></div><button type="button" id="chat-poll-add-option">Add option</button><footer><button type="button" id="chat-poll-cancel">Cancel</button><button type="submit">Send poll</button></footer></form></dialog>
             <div class="chat-action-feedback" id="chat-action-feedback" aria-live="polite"></div>
 
             <dialog class="forward-dialog" id="forward-dialog">
@@ -270,11 +278,13 @@ function applyChatTheme(option) {
     const sent = dark ? option.dataset.darkSent : option.dataset.sent;
     const received = dark ? option.dataset.darkReceived : option.dataset.received;
     const accent = dark ? option.dataset.darkAccent : option.dataset.accent;
+    const themeText = dark ? option.dataset.darkText : option.dataset.text;
     const colors = {
         "--chat-bg": bg,
         "--chat-sent": sent,
         "--chat-received": received,
-        "--chat-accent": accent
+        "--chat-accent": accent,
+        "--chat-text": themeText || "var(--ui-text)"
     };
     Object.entries(colors).forEach(([name, value]) => chatThemeContainer.style.setProperty(name, value));
     chatBox.style.setProperty("background-color", bg, "important");
@@ -370,7 +380,15 @@ function renderSticker(span, sticker) {
     }
 }
 
-function addBubble(content, mine, messageId, status = "sent", messageType = "text", sticker = null) {
+function renderPollCard(poll) {
+    const card = document.createElement("div"); card.className = "bubble-content chat-poll"; card.dataset.pollId = poll.id;
+    const title = document.createElement("strong"); title.textContent = poll.question; card.appendChild(title);
+    (poll.options || []).forEach((option) => { const button = document.createElement("button"); button.type = "button"; button.dataset.pollOption = option.id; button.textContent = `${option.label} ${option.votes}`; card.appendChild(button); });
+    const total = document.createElement("small"); total.textContent = `${poll.total} vote${poll.total === 1 ? "" : "s"}`; card.appendChild(total);
+    return card;
+}
+
+function addBubble(content, mine, messageId, status = "sent", messageType = "text", sticker = null, poll = null) {
     const div = document.createElement("div");
     div.className = "bubble " + (mine ? "sent" : "received");
     if (chatThemeContainer) {
@@ -381,6 +399,8 @@ function addBubble(content, mine, messageId, status = "sent", messageType = "tex
     const text = document.createElement("span");
     text.className = "bubble-content";
     if (messageType === "sticker") renderSticker(text, sticker);
+    else if (messageType === "image") { const image = document.createElement("img"); image.className = "chat-shared-photo"; image.src = content; image.alt = "Shared photo"; image.loading = "lazy"; text.appendChild(image); }
+    else if (messageType === "poll" && poll) { /* Rendered below as an interactive card. */ }
     else text.textContent = content;   // textContent, not innerHTML -> no XSS
     div.dataset.messageType = messageType;
     div.dataset.content = content;
@@ -412,7 +432,8 @@ function addBubble(content, mine, messageId, status = "sent", messageType = "tex
     });
     actions.appendChild(menu);
     div.appendChild(actions);
-    div.appendChild(text);
+    if (messageType === "poll" && poll) div.appendChild(renderPollCard(poll));
+    else div.appendChild(text);
     if (mine) {
         setReceipt(div, status);
     }
@@ -449,12 +470,46 @@ function addStickerItem(sticker, favorite = false) {
 }
 
 socket.on("receive_message", (data) => {
-    addBubble(data.content, data.sender_id === CURRENT_USER_ID, data.id, data.receipt, data.message_type || "text", data.sticker);
+    addBubble(data.content, data.sender_id === CURRENT_USER_ID, data.id, data.receipt, data.message_type || "text", data.sticker, data.poll);
     if (data.message_type === "sticker" && data.sticker) {
         const item = addStickerItem(data.sticker, false) || stickerGrid.querySelector(`[data-id="${data.sticker.id}"]`);
         if (item) item.dataset.recent = "true";
         filterStickers();
     }
+});
+socket.on("poll_update", (poll) => {
+    const bubble = chatBox.querySelector(`[data-poll-id="${Number(poll.id)}"]`);
+    if (!bubble) return;
+    const next = renderPollCard(poll); bubble.replaceWith(next);
+});
+
+chatBox.addEventListener("click", async (event) => {
+    const option = event.target.closest("[data-poll-option]");
+    if (!option) return;
+    const card = option.closest("[data-poll-id]");
+    try {
+        const response = await fetch(`/chat/polls/${card.dataset.pollId}/vote`, {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({option_id:Number(option.dataset.pollOption)})});
+        const result = await response.json(); if (!response.ok || !result.ok) throw new Error(result.error || "Vote failed");
+        card.replaceWith(renderPollCard(result.poll));
+    } catch (error) { showActionFeedback(error.message); }
+});
+
+const pollDialog = document.getElementById("chat-poll-dialog");
+document.getElementById("pollBtn").addEventListener("click", () => pollDialog.showModal());
+document.getElementById("chat-poll-cancel").addEventListener("click", () => pollDialog.close());
+document.getElementById("chat-poll-add-option").addEventListener("click", () => {
+    const container = document.getElementById("chat-poll-options"); if (container.children.length >= 6) return;
+    const field = document.createElement("input"); field.className = "chat-poll-option-input"; field.maxLength = 100; field.placeholder = `Option ${container.children.length + 1}`; field.required = true; container.appendChild(field);
+});
+document.getElementById("chat-poll-form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const question = document.getElementById("chat-poll-question").value;
+    const options = [...document.querySelectorAll(".chat-poll-option-input")].map((field) => field.value);
+    try {
+        const response = await fetch(`/chat/${friendId}/poll`, {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({question, options})});
+        const result = await response.json(); if (!response.ok || !result.ok) throw new Error(result.error || "Poll could not be sent");
+        pollDialog.close(); event.target.reset(); document.getElementById("chat-poll-options").innerHTML = '<input class="chat-poll-option-input" maxlength="100" placeholder="Option 1" required><input class="chat-poll-option-input" maxlength="100" placeholder="Option 2" required>';
+    } catch (error) { showActionFeedback(error.message); }
 });
 socket.on("pending_message_status", updatePendingMessageState);
 socket.on("sticker_pack_shared", (data) => {
@@ -590,6 +645,20 @@ form.addEventListener("submit", (e) => {
     stopTyping();
 });
 
+const chatPhotoFile = document.getElementById("chat-photo-file");
+chatPhotoFile.addEventListener("change", async () => {
+    const file = chatPhotoFile.files?.[0];
+    if (!file) return;
+    const body = new FormData(); body.append("photo", file);
+    try {
+        const response = await fetch(`/chat/${friendId}/photo`, {method: "POST", body});
+        const result = await response.json();
+        if (!response.ok || !result.ok) throw new Error(result.error || "Photo could not be sent");
+        showActionFeedback("Photo sent");
+    } catch (error) { showActionFeedback(error.message || "Photo could not be sent"); }
+    finally { chatPhotoFile.value = ""; }
+});
+
 // =====================
 // TYPING
 // =====================
@@ -639,9 +708,18 @@ emojiPicker.addEventListener("click", (event) => {
     emojiCursorStart = input.selectionStart;
     emojiCursorEnd = input.selectionEnd;
     input.dispatchEvent(new Event("input", { bubbles: true }));
-    emojiPicker.hidden = true;
-    emojiBtn.setAttribute("aria-expanded", "false");
 });
+
+document.querySelectorAll("[data-emoji-category]").forEach((button) => button.addEventListener("click", () => {
+    const categoryTerms = {
+        Smileys: "smile happy blush love laugh cry cute cool think", People: "hands people clap pray hug wave",
+        Hearts: "heart love", Nature: "nature butterfly flower tulip bear rabbit leaf moon rainbow cloud",
+        Food: "fruit strawberry food", Activities: "party celebrate fire", Objects: "toy teddy bow sparkle star"
+    };
+    const search = emojiPicker.querySelector("[data-emoji-search]");
+    search.value = categoryTerms[button.dataset.emojiCategory] || "";
+    search.dispatchEvent(new Event("input", {bubbles: true}));
+}));
 
 document.addEventListener("click", (event) => {
     if (!event.target.closest(".chat-emoji-tools, #chat-emoji-picker, #sticker-picker")) {

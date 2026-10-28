@@ -38,21 +38,11 @@
                 <a class="{{ 'active' if request.path.startswith('/status') else '' }}" href="/status"><span>◌</span>Updates</a>
                 <a class="{{ 'active' if request.path.startswith('/profile') else '' }}" href="/profile"><span>○</span>Profile</a>
                 <a class="{{ 'active' if request.path.startswith('/settings') else '' }}" href="/settings"><span>⚙</span>Settings</a>
-                <div class="nav-secondary-links">
-                    <button type="button" data-appearance-toggle aria-label="Toggle dark mode"><span>◐</span> Dark mode</button>
-                    <a href="/logout">Log out</a>
-                </div>
             {% else %}
                 <a href="/login">Login</a>
                 <a href="/signup">Signup</a>
             {% endif %}
         </div>
-        {% if session.get("user_id") %}
-        <button type="button" class="mobile-more-toggle" id="mobile-more-toggle" aria-label="More navigation" aria-expanded="false">•••</button>
-        <div class="mobile-more-menu" id="mobile-more-menu" hidden>
-            <button type="button" data-appearance-toggle><span>◐</span> Dark mode</button><a href="/logout">Log out</a>
-        </div>
-        {% endif %}
     </nav>
 
     <!-- MAIN APP WRAPPER -->
@@ -119,6 +109,30 @@
         socket.on("unread_count_update", (data) => {
             updateUnreadBadge(data.total);
             updateConversationUnread(data.peer_id, data.conversation);
+        });
+        socket.on("friend_streak_update", (data) => {
+            document.querySelectorAll(`[data-streak-peer-id="${Number(data.peer_id)}"]`).forEach((badge) => {
+                const count = Number(data.count) || 0;
+                badge.hidden = count === 0;
+                const number = badge.querySelector("b");
+                if (number) number.textContent = String(count);
+                else if (count) badge.textContent = `🔥 ${count}`;
+                const row = badge.closest("[data-streak-row]");
+                if (row) {
+                    const ended = row.querySelector(".friend-streak-ended");
+                    if (ended) ended.hidden = count > 0 || data.pending_today;
+                    const risk = row.querySelector("[data-streak-risk]");
+                    if (risk) risk.hidden = !data.at_risk;
+                    const pending = row.querySelector("[data-streak-pending]");
+                    if (pending) {
+                        pending.hidden = !data.pending_today;
+                        pending.textContent = data.you_sent_today ? `Waiting for ${row.querySelector("a")?.textContent || "your friend"}` : "You still need to send a message today";
+                    }
+                }
+            });
+        });
+        socket.on("friendship_updated", () => {
+            if (window.location.pathname === "/people" || window.location.pathname === "/friends") window.location.reload();
         });
         socket.on("inbox_message", (data) => {
             if (Number(data.receiver_id) !== Number(CURRENT_USER_ID)) return;
@@ -305,6 +319,13 @@
             body.classList.toggle("dark-mode");
             document.documentElement.classList.toggle("dark-mode", body.classList.contains("dark-mode"));
             persistMode(body.classList.contains("dark-mode") ? "dark" : "light");
+            updateLabel();
+        }));
+        document.querySelectorAll('input[name="appearance_mode"]').forEach((radio) => radio.addEventListener("change", () => {
+            if (!radio.checked) return;
+            body.classList.toggle("dark-mode", radio.value === "dark");
+            document.documentElement.classList.toggle("dark-mode", radio.value === "dark");
+            persistMode(radio.value);
             updateLabel();
         }));
         const moreButton = document.getElementById("mobile-more-toggle");

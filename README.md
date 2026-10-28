@@ -145,6 +145,25 @@ Updates appear in the horizontal story row and expire after 12 hours. A user can
 create a poll with a question and two to six distinct options. Friends can vote
 once; the creator and people who have voted can see vote totals and percentages.
 
+## People, friendships, and message streaks
+
+The People page separates incoming and outgoing requests, discovery, accepted
+friends, and streaks. Friend requests are visible to their two participants;
+only the recipient can accept or decline. Accepted friendships persist until a
+user removes the friend. Profile owners can hide their accepted-friends and
+mutual-friends lists in **Settings → Privacy**. Email search is exact-match and
+never returns an email address.
+
+Daily friend streaks use UTC calendar days. A day qualifies after each person in
+an accepted friendship sends at least one direct, user-authored message to the
+other that day. Repeated messages that day do not add more days. Reactions,
+automated notices, and group messages do not count. The streak advances once
+when both people complete the next consecutive UTC day. Missing a full day ends
+the active streak; the saved historical count remains until the next completed
+exchange starts a new streak at one. Refreshes and server restarts do not change
+saved streaks. The People page indicates when a streak completed yesterday and
+needs messages today to continue.
+
 ## Troubleshooting
 
 **`An attempt was made to access a socket in a way forbidden by its access permissions`**

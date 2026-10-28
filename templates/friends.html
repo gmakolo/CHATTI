@@ -6,65 +6,79 @@
         <span>Your space to connect, keep up with friends, and discover someone new.</span>
     </header>
 
-    {% if incoming_requests %}
-    <section class="friend-added-notice people-requests" aria-label="Friend requests">
-        <strong>Friend requests <span>{{ incoming_requests|length }}</span></strong>
-        {% for item in incoming_requests %}
-        <div class="friend-request-row">
-            <span>{{ item.person.username }} wants to be your friend.</span>
-            <div class="friend-request-actions">
-                <form method="POST" action="/friend_request/{{ item.id }}/accept"><input type="hidden" name="return_to" value="/people"><button type="submit">Accept</button></form>
-                <form method="POST" action="/friend_request/{{ item.id }}/decline"><input type="hidden" name="return_to" value="/people"><button type="submit">Decline</button></form>
-            </div>
-        </div>
-        {% endfor %}
-    </section>
-    {% endif %}
-
     <section class="account-directory people-directory-page" id="people-directory">
         <div class="account-directory-heading people-directory-heading">
             <div><h2>Find People</h2><p>Manage your connections or meet new people in the CHATTI community.</p></div>
         </div>
         <div class="people-tabs" role="tablist" aria-label="People">
+            <button type="button" class="people-tab{% if active_people_tab == 'requests' %} active{% endif %}" id="requests-tab" role="tab" aria-selected="{{ 'true' if active_people_tab == 'requests' else 'false' }}" aria-controls="requests-panel" data-people-tab="requests">Friend Requests <span>{{ incoming_requests|length + outgoing_requests|length }}</span></button>
+            <button type="button" class="people-tab{% if active_people_tab == 'discover' %} active{% endif %}" id="discover-tab" role="tab" aria-selected="{{ 'true' if active_people_tab == 'discover' else 'false' }}" aria-controls="discover-panel" data-people-tab="discover">Discover People <span>{{ discover_accounts|length }}</span></button>
             <button type="button" class="people-tab{% if active_people_tab == 'friends' %} active{% endif %}" id="friends-tab" role="tab" aria-selected="{{ 'true' if active_people_tab == 'friends' else 'false' }}" aria-controls="friends-panel" data-people-tab="friends">Friends <span>{{ friends|length }}</span></button>
-            <button type="button" class="people-tab{% if active_people_tab == 'discover' %} active{% endif %}" id="discover-tab" role="tab" aria-selected="{{ 'true' if active_people_tab == 'discover' else 'false' }}" aria-controls="discover-panel" data-people-tab="discover">Discover <span>{{ discover_accounts|length }}</span></button>
+            <button type="button" class="people-tab{% if active_people_tab == 'streaks' %} active{% endif %}" id="streaks-tab" role="tab" aria-selected="{{ 'true' if active_people_tab == 'streaks' else 'false' }}" aria-controls="streaks-panel" data-people-tab="streaks">Streaks <span>{{ streak_items|length }}</span></button>
+        </div>
+
+        <div class="account-directory-list people-panel" id="requests-panel" role="tabpanel" aria-labelledby="requests-tab" data-people-panel="requests" {% if active_people_tab != 'requests' %}hidden{% endif %}>
+            <section class="people-request-section"><h3>Incoming requests</h3>
+                {% for item in incoming_requests %}<div class="friend-request-row"><span>{{ item.person.username }}</span><span>wants to be your friend.</span><div class="friend-request-actions"><form method="POST" action="/friend_request/{{ item.id }}/accept"><input type="hidden" name="return_to" value="/people#requests-panel"><button type="submit">Accept</button></form><form method="POST" action="/friend_request/{{ item.id }}/decline"><input type="hidden" name="return_to" value="/people#requests-panel"><button type="submit">Decline</button></form></div></div>
+                {% else %}<p class="people-empty">No incoming friend requests.</p>{% endfor %}
+            </section>
+            <section class="people-request-section"><h3>Outgoing requests</h3>
+                {% for item in outgoing_requests %}<div class="friend-request-row"><span>{{ item.person.username }}</span><span>Status: {{ item.status }}</span><form method="POST" action="/remove_friend/{{ item.person.id }}" class="account-remove-form"><input type="hidden" name="return_to" value="/people#requests-panel"><button type="submit">Cancel request</button></form></div>
+                {% else %}<p class="people-empty">No outgoing requests.</p>{% endfor %}
+            </section>
         </div>
 
         <div class="account-directory-list people-panel" id="friends-panel" role="tabpanel" aria-labelledby="friends-tab" data-people-panel="friends" {% if active_people_tab != 'friends' %}hidden{% endif %}>
             {% for friend in friends %}
             <div class="account-directory-row people-friend-row" data-account-name="{{ friend.username|lower }}">
-                <a class="people-person-link" href="/chat/{{ friend.id }}">
+                <a class="people-person-link" href="/profile/{{ friend.id }}">
                     <div class="avatar{% if friend.id in online_users %} is-online{% endif %}" data-user-id="{{ friend.id }}">{% if can_view_profile_picture(friend) %}<img src="/avatar/{{ friend.id }}" alt="">{% else %}{{ friend.username[0].upper() }}{% endif %}</div>
-                    <span class="account-directory-name">{{ friend.username }}</span>
+                    <span class="account-directory-name">{{ friend.full_name or friend.username }}<small>@{{ friend.username }}</small></span>
                 </a>
-                <span class="friend-connected-label">Friends <b>✓</b></span>
-                <form method="POST" action="/remove_friend/{{ friend.id }}" class="account-remove-form" onsubmit="return confirm('Remove {{ friend.username }} from your friends?')">
-                    <input type="hidden" name="return_to" value="/people"><button type="submit" aria-label="Remove {{ friend.username }}" title="Remove friend">Remove</button>
-                </form>
+                <span class="friend-connected-label" aria-label="Accepted friendship">Friends ✓</span>
+                <span class="friend-activity-label">{{ activity_by_user[friend.id] }}</span>
+                {% set streak = streak_map[friend.id] %}<span class="friend-streak-badge" data-friend-streak data-streak-peer-id="{{ friend.id }}" title="{{ 'Send messages today to keep it going' if streak.at_risk else 'Current daily message streak' }}" {% if not streak.count %}hidden{% endif %}>🔥 <b>{{ streak.count }}</b>{% if streak.at_risk %}<small>Keep it going today</small>{% endif %}</span>
+                <a class="friend-chat-link" href="/chat/{{ friend.id }}">Message</a>
             </div>
             {% else %}<p class="people-empty">No friends yet. Open Discover to find people.</p>{% endfor %}
         </div>
 
         <div class="account-directory-list people-panel" id="discover-panel" role="tabpanel" aria-labelledby="discover-tab" data-people-panel="discover" {% if active_people_tab != 'discover' %}hidden{% endif %}>
-            <form class="people-email-search" id="people-email-search-form" role="search">
-                <label for="people-email-search">Search friends by email</label>
+            <section class="discover-people-list"><h3>People you may know</h3>
+                {% for person in discover_accounts %}<div class="account-directory-row discover-person-row">
+                    <span class="people-person-link"><span class="avatar">{% if can_view_profile_picture(person) %}<img src="/avatar/{{ person.id }}" alt="">{% else %}{{ person.username[0].upper() }}{% endif %}</span><span class="account-directory-name">{{ person.username }}</span></span>
+                    <form method="POST" action="/add_friend"><input type="hidden" name="user_id" value="{{ person.id }}"><input type="hidden" name="return_to" value="/people#discover-panel"><button type="submit" class="account-add-button">Add Friend</button></form>
+                </div>{% else %}<p class="people-empty">No new people to suggest right now.</p>{% endfor %}
+            </section>
+            <form class="people-email-search" id="people-search-form" role="search">
+                <label for="people-search-input">Find someone by username or email</label>
                 <div class="people-email-search-controls">
-                    <input type="email" id="people-email-search" name="email" placeholder="Search friends by email" autocomplete="email" maxlength="254" required>
+                    <input type="search" id="people-search-input" name="query" placeholder="Search by username or email" autocomplete="off" maxlength="254" required>
                     <button type="submit">Search</button>
                 </div>
-                <small>Email addresses stay private and are never shown in search results.</small>
+                <small>Email addresses are used only to find an account. They stay private and never appear in results.</small>
             </form>
-            <div class="people-email-result" id="people-email-result" role="status" aria-live="polite" hidden></div>
-            <p class="people-empty">Enter the exact email address someone used to sign up. Their account must allow discovery by email.</p>
+            <div class="people-search-result" id="people-search-result" role="status" aria-live="polite" hidden></div>
+            <p class="people-empty">Search by a username or registered email. You’ll only see accounts that allow discovery.</p>
+        </div>
+
+        <div class="account-directory-list people-panel" id="streaks-panel" role="tabpanel" aria-labelledby="streaks-tab" data-people-panel="streaks" {% if active_people_tab != 'streaks' %}hidden{% endif %}>
+            <p class="streak-timezone-note">Daily streak days are measured in UTC. Both friends must send at least one message that day.</p>
+            {% for item in streak_items %}<div class="friend-streak-row" data-streak-row="{{ item.friend.id }}"><a href="/chat/{{ item.friend.id }}">{{ item.friend.username }}</a>
+                <strong class="friend-streak-badge" data-friend-streak data-streak-peer-id="{{ item.friend.id }}" {% if not item.count %}hidden{% endif %}>🔥 <b>{{ item.count }}</b> day{{ '' if item.count == 1 else 's' }}</strong>{% if not item.count %}<strong class="friend-streak-ended">No active streak</strong>{% endif %}
+                <span class="streak-at-risk" data-streak-risk {% if not item.at_risk %}hidden{% endif %}>Send a message today to keep the streak.</span>
+                <span class="streak-pending" data-streak-pending {% if not item.pending_today %}hidden{% endif %}>{{ 'Waiting for ' ~ item.friend.username if item.you_sent_today else 'You still need to send a message today' }}</span>
+                {% if item.best_count %}<small>Best: {{ item.best_count }} day{{ '' if item.best_count == 1 else 's' }}</small>{% endif %}
+            </div>{% else %}<p class="people-empty">No streaks yet. Exchange messages with a friend to start one.</p>{% endfor %}
         </div>
     </section>
 </main>
 {% endblock %}
 {% block scripts %}
 <script>
-const emailSearchForm = document.getElementById("people-email-search-form");
-const emailSearchInput = document.getElementById("people-email-search");
-const emailSearchResult = document.getElementById("people-email-result");
+const peopleSearchForm = document.getElementById("people-search-form");
+const peopleSearchInput = document.getElementById("people-search-input");
+const peopleSearchResult = document.getElementById("people-search-result");
 const peopleTabs = [...document.querySelectorAll("[data-people-tab]")];
 const peoplePanels = [...document.querySelectorAll("[data-people-panel]")];
 function selectPeopleTab(name) {
@@ -77,15 +91,16 @@ function selectPeopleTab(name) {
 }
 peopleTabs.forEach((tab) => tab.addEventListener("click", () => selectPeopleTab(tab.dataset.peopleTab)));
 selectPeopleTab({{ active_people_tab|tojson }});
-if (window.location.hash === "#discover-panel") selectPeopleTab("discover");
+const tabForHash = {"#requests-panel":"requests", "#discover-panel":"discover", "#friends-panel":"friends", "#streaks-panel":"streaks"}[window.location.hash];
+if (tabForHash) selectPeopleTab(tabForHash);
 
-function emailSearchMessage(message, error = false) {
-    emailSearchResult.replaceChildren();
-    emailSearchResult.hidden = false;
-    emailSearchResult.classList.toggle("is-error", error);
+function peopleSearchMessage(message, error = false) {
+    peopleSearchResult.replaceChildren();
+    peopleSearchResult.hidden = false;
+    peopleSearchResult.classList.toggle("is-error", error);
     const text = document.createElement("p");
     text.textContent = message;
-    emailSearchResult.appendChild(text);
+    peopleSearchResult.appendChild(text);
 }
 
 function addHiddenField(form, name, value) {
@@ -96,42 +111,42 @@ function addHiddenField(form, name, value) {
     form.appendChild(input);
 }
 
-emailSearchForm?.addEventListener("submit", async (event) => {
+peopleSearchForm?.addEventListener("submit", async (event) => {
     event.preventDefault();
-    const email = emailSearchInput.value.trim();
-    if (!email) return;
-    emailSearchMessage("Searching…");
-    const submit = emailSearchForm.querySelector("button[type=submit]");
+    const query = peopleSearchInput.value.trim();
+    if (!query) return;
+    peopleSearchMessage("Searching…");
+    const submit = peopleSearchForm.querySelector("button[type=submit]");
     submit.disabled = true;
     try {
         const response = await fetch("/people/search", {
             method: "POST",
             headers: {"Content-Type": "application/json", "Accept": "application/json"},
-            body: JSON.stringify({email}), cache: "no-store"
+            body: JSON.stringify({query}), cache: "no-store"
         });
         const result = await response.json();
         if (!response.ok || !result.ok) {
-            emailSearchMessage(result.error || "No discoverable account matched that email address.", true);
+            peopleSearchMessage(result.error || "No matching people found. Try another username or email.", true);
             return;
         }
 
         const person = result.person;
-        emailSearchResult.replaceChildren();
-        emailSearchResult.hidden = false;
-        emailSearchResult.classList.remove("is-error");
+        peopleSearchResult.replaceChildren();
+        peopleSearchResult.hidden = false;
+        peopleSearchResult.classList.remove("is-error");
         const card = document.createElement("div");
-        card.className = "people-email-result-person account-directory-row";
+        card.className = "people-search-result-person account-directory-row";
         const avatar = document.createElement("span");
-        avatar.className = "avatar people-email-result-avatar";
+        avatar.className = "avatar people-search-result-avatar";
         if (person.avatar_url) {
             const image = document.createElement("img");
             image.src = person.avatar_url;
             image.alt = "";
             avatar.appendChild(image);
         } else avatar.textContent = person.username.slice(0, 1).toUpperCase();
-        const name = document.createElement("a");
+        const name = document.createElement(person.state === "friends" ? "a" : "span");
         name.className = "account-directory-name";
-        name.href = `/profile/${person.id}`;
+        if (person.state === "friends") name.href = `/profile/${person.id}`;
         name.textContent = person.username;
         card.append(avatar, name);
 
@@ -165,7 +180,7 @@ emailSearchForm?.addEventListener("submit", async (event) => {
             request.method = "POST";
             request.action = "/add_friend";
             addHiddenField(request, "return_to", "/people#discover-panel");
-            addHiddenField(request, "email", email);
+            addHiddenField(request, "user_id", person.id);
             const addButton = document.createElement("button");
             addButton.type = "submit";
             addButton.className = "account-add-button";
@@ -173,9 +188,9 @@ emailSearchForm?.addEventListener("submit", async (event) => {
             request.appendChild(addButton);
             card.appendChild(request);
         }
-        emailSearchResult.appendChild(card);
+        peopleSearchResult.appendChild(card);
     } catch (_) {
-        emailSearchMessage("Search is unavailable right now. Please try again.", true);
+        peopleSearchMessage("Search is unavailable right now. Please try again.", true);
     } finally {
         submit.disabled = false;
     }

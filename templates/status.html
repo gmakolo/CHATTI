@@ -247,18 +247,35 @@ function stopCamera() {
     cameraVideo.srcObject = null;
 }
 function showCameraDialog() {
+    if (cameraDialog.open) return;
     if (typeof cameraDialog.showModal === "function") cameraDialog.showModal();
     else cameraDialog.setAttribute("open", "");
+}
+function closeCameraDialog() {
+    if (typeof cameraDialog.close === "function") cameraDialog.close();
+    else {
+        cameraDialog.removeAttribute("open");
+        stopCamera();
+    }
 }
 async function startStatusCamera() {
     showCameraDialog();
     cameraError.textContent = "";
+    photoSource = null;
+    sourceFile = null;
+    cameraEditor.hidden = true;
+    cameraUseButton.disabled = true;
+    cameraCanvas.hidden = true;
+    cameraMessage.hidden = false;
+    cameraVideo.hidden = true;
+    document.getElementById("status-camera-capture").hidden = true;
+    document.getElementById("status-camera-switch").hidden = true;
+    stopCamera();
     if (!navigator.mediaDevices?.getUserMedia) {
         cameraMessage.textContent = "Camera access is not supported here. Choose a photo from your gallery instead.";
         cameraError.textContent = "This browser or connection does not support camera access.";
         return;
     }
-    stopCamera();
     try {
         cameraStream = await navigator.mediaDevices.getUserMedia({video: {facingMode: {ideal: cameraFacing}}, audio: false});
         cameraVideo.srcObject = cameraStream;
@@ -290,19 +307,22 @@ function drawEditedPhoto() {
     if (!photoSource || !sourceWidth || !sourceHeight) return;
     const crop = currentCrop();
     const rotated = photoRotation % 180 !== 0;
-    cameraCanvas.width = Math.max(1, Math.round(rotated ? crop.height : crop.width));
-    cameraCanvas.height = Math.max(1, Math.round(rotated ? crop.width : crop.height));
+    const scale = Math.min(1, 2560 / Math.max(crop.width, crop.height));
+    cameraCanvas.width = Math.max(1, Math.round((rotated ? crop.height : crop.width) * scale));
+    cameraCanvas.height = Math.max(1, Math.round((rotated ? crop.width : crop.height) * scale));
     cameraContext.save();
     cameraContext.translate(cameraCanvas.width / 2, cameraCanvas.height / 2);
     cameraContext.rotate(photoRotation * Math.PI / 180);
     cameraContext.filter = `${photoFilters[photoFilter]} brightness(${document.getElementById("status-camera-brightness").value}%) contrast(${document.getElementById("status-camera-contrast").value}%)`;
-    cameraContext.drawImage(photoSource, crop.x, crop.y, crop.width, crop.height, -crop.width / 2, -crop.height / 2, crop.width, crop.height);
+    cameraContext.drawImage(photoSource, crop.x, crop.y, crop.width, crop.height,
+        -crop.width * scale / 2, -crop.height * scale / 2, crop.width * scale, crop.height * scale);
     cameraContext.restore();
     const text = document.getElementById("status-camera-overlay").value.trim();
     if (text) {
         const x = cameraCanvas.width * Number(document.getElementById("status-camera-text-x").value) / 100;
         const y = cameraCanvas.height * Number(document.getElementById("status-camera-text-y").value) / 100;
-        const fontSize = Number(document.getElementById("status-camera-text-size").value);
+        const fontSize = Number(document.getElementById("status-camera-text-size").value) *
+            Math.max(.75, Math.min(cameraCanvas.width, cameraCanvas.height) / 480);
         const style = document.getElementById("status-camera-text-style").value;
         cameraContext.save();
         cameraContext.filter = "none";
@@ -322,15 +342,18 @@ function drawEditedPhoto() {
     cameraEditor.hidden = false;
     cameraUseButton.disabled = false;
 }
-function setEditorSource(source, width, height, filename, file = null) {
+function setEditorSource(source, width, height, filename, file = null, resetEdits = true) {
     photoSource = source; sourceWidth = width; sourceHeight = height;
     sourceFileName = filename || "chatti-update.png";
     sourceFile = file;
-    photoRotation = 0; photoFilter = "natural";
-    document.getElementById("status-camera-brightness").value = "100";
-    document.getElementById("status-camera-contrast").value = "100";
-    document.getElementById("status-camera-crop").value = "original";
-    document.getElementById("status-camera-overlay").value = "";
+    photoRotation = 0;
+    if (resetEdits) {
+        photoFilter = "natural";
+        document.getElementById("status-camera-brightness").value = "100";
+        document.getElementById("status-camera-contrast").value = "100";
+        document.getElementById("status-camera-crop").value = "original";
+        document.getElementById("status-camera-overlay").value = "";
+    }
     document.querySelectorAll("[data-photo-filter]").forEach((button) => button.classList.toggle("active", button.dataset.photoFilter === photoFilter));
     drawEditedPhoto();
 }
@@ -342,9 +365,18 @@ function openGalleryPhoto(file) {
     document.getElementById("status-camera-capture").hidden = true;
     document.getElementById("status-camera-switch").hidden = true;
     const image = new Image();
-    image.onload = () => setEditorSource(image, image.naturalWidth, image.naturalHeight, file.name, file);
-    image.onerror = () => { cameraError.textContent = "CHATTI could not read that image. Choose another photo."; };
-    image.src = URL.createObjectURL(file);
+    let imageUrl = URL.createObjectURL(file);
+    image.onload = () => {
+        setEditorSource(image, image.naturalWidth, image.naturalHeight, file.name, file);
+        URL.revokeObjectURL(imageUrl);
+        imageUrl = "";
+    };
+    image.onerror = () => {
+        cameraError.textContent = "CHATTI could not read that image. Choose another photo.";
+        if (imageUrl) URL.revokeObjectURL(imageUrl);
+        imageUrl = "";
+    };
+    image.src = imageUrl;
 }
 async function addEditedPhotoToUpdate() {
     if (!photoSource) return;
@@ -360,8 +392,7 @@ async function addEditedPhotoToUpdate() {
     previous.forEach((file) => transfer.items.add(file));
     statusMediaInput.files = transfer.files;
     stopCamera();
-    cameraDialog.close?.();
-    cameraDialog.removeAttribute("open");
+    closeCameraDialog();
     skipNextMediaEdit = true;
     statusMediaInput.dispatchEvent(new Event("change", {bubbles: true}));
 }
@@ -684,15 +715,22 @@ document.getElementById("status-camera-capture").addEventListener("click", async
     const blob = await new Promise((resolve) => capture.toBlob(resolve, "image/jpeg", .95));
     if (!blob) { cameraError.textContent = "CHATTI could not capture that photo. Please try again."; return; }
     const image = new Image();
-    image.onload = () => setEditorSource(image, image.naturalWidth, image.naturalHeight, "camera-photo.jpg");
-    image.onerror = () => { cameraError.textContent = "CHATTI could not open the captured photo."; };
-    image.src = URL.createObjectURL(blob);
+    const captureUrl = URL.createObjectURL(blob);
+    image.onload = () => {
+        setEditorSource(image, image.naturalWidth, image.naturalHeight, "camera-photo.jpg", null, false);
+        URL.revokeObjectURL(captureUrl);
+    };
+    image.onerror = () => {
+        cameraError.textContent = "CHATTI could not open the captured photo.";
+        URL.revokeObjectURL(captureUrl);
+    };
+    image.src = captureUrl;
 });
 document.getElementById("status-camera-use").addEventListener("click", addEditedPhotoToUpdate);
-document.getElementById("status-camera-close").addEventListener("click", () => cameraDialog.close?.());
-document.getElementById("status-camera-cancel").addEventListener("click", () => cameraDialog.close?.());
+document.getElementById("status-camera-close").addEventListener("click", closeCameraDialog);
+document.getElementById("status-camera-cancel").addEventListener("click", closeCameraDialog);
 cameraDialog.addEventListener("close", stopCamera);
-cameraDialog.addEventListener("click", (event) => { if (event.target === cameraDialog) cameraDialog.close?.(); });
+cameraDialog.addEventListener("click", (event) => { if (event.target === cameraDialog) closeCameraDialog(); });
 document.querySelectorAll("[data-photo-filter]").forEach((button) => button.addEventListener("click", () => {
     photoFilter = button.dataset.photoFilter;
     document.querySelectorAll("[data-photo-filter]").forEach((item) => item.classList.toggle("active", item === button));

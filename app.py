@@ -52,6 +52,7 @@ CHAT_THEMES = {
     "sunshine": {"label": "Midnight Violet", "bg": "#F1EDFF", "sent": "#5B21B6", "received": "#DDD6FE", "accent": "#6D28D9", "dark_bg": "#0F0B1A", "dark_sent": "#6D28D9", "dark_received": "#2B1E42", "dark_accent": "#A78BFA"},
     "plum": {"label": "Rose Lavender", "bg": "#FFF7FC", "sent": "#9333EA", "received": "#FCE7F3", "accent": "#7C3AED", "dark_bg": "#211936", "dark_sent": "#A855F7", "dark_received": "#40263F", "dark_accent": "#D8B4FE"},
     "midnight": {"label": "Deep Purple", "bg": "#F5F0FF", "sent": "#5B21B6", "received": "#EDE9FE", "accent": "#6D28D9", "dark_bg": "#0F0B1A", "dark_sent": "#6D28D9", "dark_received": "#2D2143", "dark_accent": "#A78BFA"},
+    "rose_pink": {"label": "Rose Pink", "bg": "#FFF0F5", "sent": "#E85D91", "received": "#FFE0EB", "accent": "#C93672", "text": "#51203A", "dark_bg": "#291521", "dark_sent": "#E85D91", "dark_received": "#48283A", "dark_accent": "#F07CA8", "dark_text": "#F7E7EF"},
 }
 STICKER_SEEDS = [
     ("Big laugh", "happy funny laugh lol", "😂", "Reactions"),
@@ -82,6 +83,7 @@ STICKER_SEEDS = [
 # Each user can have several browser tabs/devices connected at once.
 online_sessions = {}
 chat_room_viewers = {}
+group_room_viewers = {}
 expiry_cleanup_started = False
 
 
@@ -152,6 +154,7 @@ class User(db.Model):
     show_online_status = db.Column(db.Boolean, nullable=True, default=True)
     show_last_seen = db.Column(db.Boolean, nullable=True, default=True)
     show_read_receipts = db.Column(db.Boolean, nullable=True, default=True)
+    show_friends = db.Column(db.Boolean, nullable=True, default=True)
     allow_messages_from = db.Column(db.String(20), nullable=True, default="friends")
     avatar_visibility = db.Column(db.String(20), nullable=True, default="everyone")
     notifications_enabled = db.Column(db.Boolean, nullable=True, default=True)
@@ -166,6 +169,29 @@ class Friendship(db.Model):
     friend_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
     status = db.Column(db.String(20), nullable=True)
     pending_message_count = db.Column(db.Integer, nullable=True, default=0)
+
+
+class FriendStreak(db.Model):
+    __tablename__ = "friend_streak"
+    id = db.Column(db.Integer, primary_key=True)
+    user_a_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    user_b_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    current_count = db.Column(db.Integer, nullable=False, default=0)
+    best_count = db.Column(db.Integer, nullable=False, default=0)
+    last_completed_on = db.Column(db.Date, nullable=True)
+    updated_at = db.Column(db.DateTime, nullable=True)
+    __table_args__ = (db.UniqueConstraint("user_a_id", "user_b_id", name="uq_friend_streak_pair"),)
+
+
+class FriendStreakDay(db.Model):
+    __tablename__ = "friend_streak_day"
+    id = db.Column(db.Integer, primary_key=True)
+    streak_id = db.Column(db.Integer, db.ForeignKey("friend_streak.id"), nullable=False)
+    day = db.Column(db.Date, nullable=False)
+    user_a_sent = db.Column(db.Boolean, nullable=False, default=False)
+    user_b_sent = db.Column(db.Boolean, nullable=False, default=False)
+    completed = db.Column(db.Boolean, nullable=False, default=False)
+    __table_args__ = (db.UniqueConstraint("streak_id", "day", name="uq_friend_streak_day"),)
 
 
 class UserBlock(db.Model):
@@ -191,6 +217,53 @@ class ConversationArchive(db.Model):
     __table_args__ = (db.UniqueConstraint("user_id", "peer_id", name="uq_conversation_archive_user_peer"),)
 
 
+class ChatGroup(db.Model):
+    __tablename__ = "chat_group"
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(80), nullable=False)
+    owner_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    created_at = db.Column(db.DateTime, default=utcnow)
+
+
+class ChatGroupMember(db.Model):
+    __tablename__ = "chat_group_member"
+    id = db.Column(db.Integer, primary_key=True)
+    group_id = db.Column(db.Integer, db.ForeignKey("chat_group.id"), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    role = db.Column(db.String(20), nullable=False, default="member")
+    joined_at = db.Column(db.DateTime, default=utcnow)
+    __table_args__ = (db.UniqueConstraint("group_id", "user_id", name="uq_chat_group_member_group_user"),)
+
+
+class GroupMessage(db.Model):
+    __tablename__ = "group_message"
+    id = db.Column(db.Integer, primary_key=True)
+    group_id = db.Column(db.Integer, db.ForeignKey("chat_group.id"), nullable=False)
+    sender_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    content = db.Column(db.String(MAX_MESSAGE_LEN), nullable=False)
+    created_at = db.Column(db.DateTime, default=utcnow)
+    edited_at = db.Column(db.DateTime, nullable=True)
+    expires_at = db.Column(db.DateTime, nullable=True)
+
+
+class GroupMessageRead(db.Model):
+    __tablename__ = "group_message_read"
+    id = db.Column(db.Integer, primary_key=True)
+    message_id = db.Column(db.Integer, db.ForeignKey("group_message.id"), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    read_at = db.Column(db.DateTime, default=utcnow)
+    __table_args__ = (db.UniqueConstraint("message_id", "user_id", name="uq_group_message_read_message_user"),)
+
+
+class GroupArchive(db.Model):
+    __tablename__ = "group_archive"
+    id = db.Column(db.Integer, primary_key=True)
+    group_id = db.Column(db.Integer, db.ForeignKey("chat_group.id"), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    created_at = db.Column(db.DateTime, default=utcnow)
+    __table_args__ = (db.UniqueConstraint("group_id", "user_id", name="uq_group_archive_group_user"),)
+
+
 class Message(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     sender_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
@@ -204,6 +277,35 @@ class Message(db.Model):
     expires_at = db.Column(db.DateTime, nullable=True)
     delete_after_seen = db.Column(db.Boolean, nullable=True, default=False)
     read_receipt_hidden = db.Column(db.Boolean, nullable=True, default=False)
+
+
+class ChatPoll(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    message_id = db.Column(db.Integer, db.ForeignKey("message.id"), nullable=False, unique=True)
+    question = db.Column(db.String(200), nullable=False)
+
+
+class ChatPollOption(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    poll_id = db.Column(db.Integer, db.ForeignKey("chat_poll.id"), nullable=False)
+    label = db.Column(db.String(100), nullable=False)
+
+
+class ChatPollVote(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    poll_id = db.Column(db.Integer, db.ForeignKey("chat_poll.id"), nullable=False)
+    option_id = db.Column(db.Integer, db.ForeignKey("chat_poll_option.id"), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    __table_args__ = (db.UniqueConstraint("poll_id", "user_id", name="uq_chat_poll_vote_user"),)
+
+
+def delete_chat_poll_for_message(message):
+    poll = ChatPoll.query.filter_by(message_id=message.id).first()
+    if not poll:
+        return
+    ChatPollVote.query.filter_by(poll_id=poll.id).delete(synchronize_session=False)
+    ChatPollOption.query.filter_by(poll_id=poll.id).delete(synchronize_session=False)
+    db.session.delete(poll)
 
 
 class Sticker(db.Model):
@@ -320,6 +422,14 @@ class FeedPostAudience(db.Model):
     __table_args__ = (db.UniqueConstraint("post_id", "user_id", name="uq_feed_post_audience_post_user"),)
 
 
+class FeedPostGroup(db.Model):
+    __tablename__ = "feed_post_group"
+    id = db.Column(db.Integer, primary_key=True)
+    post_id = db.Column(db.Integer, db.ForeignKey("feed_post.id"), nullable=False)
+    group_id = db.Column(db.Integer, db.ForeignKey("chat_group.id"), nullable=False)
+    __table_args__ = (db.UniqueConstraint("post_id", "group_id", name="uq_feed_post_group_post_group"),)
+
+
 class PostMedia(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     post_id = db.Column(db.Integer, db.ForeignKey("feed_post.id"), nullable=False)
@@ -428,6 +538,19 @@ def ensure_schema():
                 "ON user (lower(username)) WHERE username IS NOT NULL AND trim(username) <> ''"
             ))
 
+    if "friendship" in inspector.get_table_names():
+        duplicate_pairs = db.session.execute(text(
+            "SELECT min(user_id, friend_id), max(user_id, friend_id) FROM friendship "
+            "GROUP BY min(user_id, friend_id), max(user_id, friend_id) HAVING COUNT(*) > 1 LIMIT 1"
+        )).first()
+        # Keep legacy duplicate rows intact. Clean databases receive a canonical
+        # pair index so concurrent requests cannot create reverse duplicates.
+        if not duplicate_pairs:
+            db.session.execute(text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_friendship_canonical_pair "
+                "ON friendship (min(user_id, friend_id), max(user_id, friend_id))"
+            ))
+
     db.session.commit()
     return added
 
@@ -437,7 +560,13 @@ def get_friends(uid):
         ((Friendship.user_id == uid) | (Friendship.friend_id == uid)) &
         (Friendship.status.is_(None) | (Friendship.status == "accepted"))
     ).all()
-    return [row.friend_id if row.user_id == uid else row.user_id for row in accepted]
+    return list(dict.fromkeys(row.friend_id if row.user_id == uid else row.user_id for row in accepted))
+
+
+def groups_for_user(uid):
+    memberships = ChatGroupMember.query.filter_by(user_id=uid).order_by(ChatGroupMember.joined_at).all()
+    groups = [db.session.get(ChatGroup, row.group_id) for row in memberships]
+    return [group for group in groups if group is not None]
 
 
 def are_friends(a, b):
@@ -449,6 +578,83 @@ def are_friends(a, b):
          ((Friendship.user_id == b) & (Friendship.friend_id == a))) &
         (Friendship.status.is_(None) | (Friendship.status == "accepted"))
     ).first() is not None
+
+
+def streak_pair_ids(first_id, second_id):
+    return (min(first_id, second_id), max(first_id, second_id))
+
+
+def friend_streak_payload(user_id, peer_id, now=None):
+    """Return the UTC-day streak state for one accepted friend pair.
+
+    A completed day stays active through the next UTC day. After that, the
+    displayed current streak expires; history remains, and a later completed
+    exchange starts a new streak at one.
+    """
+    now = now or utcnow()
+    today = now.date()
+    a_id, b_id = streak_pair_ids(user_id, peer_id)
+    streak = FriendStreak.query.filter_by(user_a_id=a_id, user_b_id=b_id).first()
+    if not streak:
+        return {"peer_id": peer_id, "count": 0, "best_count": 0, "at_risk": False,
+                "pending_today": False, "you_sent_today": False, "friend_sent_today": False}
+    last_day = streak.last_completed_on
+    elapsed_days = (today - last_day).days if last_day else None
+    count = streak.current_count if elapsed_days is not None and 0 <= elapsed_days <= 1 else 0
+    day = FriendStreakDay.query.filter_by(streak_id=streak.id, day=today).first()
+    you_is_a = user_id == streak.user_a_id
+    your_sent = bool(day and (day.user_a_sent if you_is_a else day.user_b_sent))
+    peer_sent = bool(day and (day.user_b_sent if you_is_a else day.user_a_sent))
+    return {"peer_id": peer_id, "count": count, "best_count": streak.best_count,
+            "last_completed_on": last_day.isoformat() if last_day else None,
+            "at_risk": bool(count and last_day == today - timedelta(days=1) and not (day and day.completed)),
+            "pending_today": bool(day and not day.completed and (day.user_a_sent or day.user_b_sent)),
+            "you_sent_today": your_sent, "friend_sent_today": peer_sent}
+
+
+def record_friend_streak_message(sender_id, receiver_id, now=None):
+    """Record one user-authored direct message for a UTC streak day.
+
+    Repeated sends by the same person that day only set the same boolean. A
+    day is counted once, after both people have each sent a qualifying message.
+    """
+    if sender_id == receiver_id or not are_friends(sender_id, receiver_id):
+        return None
+    now = now or utcnow()
+    today = now.date()
+    a_id, b_id = streak_pair_ids(sender_id, receiver_id)
+    streak = FriendStreak.query.filter_by(user_a_id=a_id, user_b_id=b_id).first()
+    if streak is None:
+        streak = FriendStreak(user_a_id=a_id, user_b_id=b_id, current_count=0, best_count=0)
+        db.session.add(streak)
+        db.session.flush()
+    day = FriendStreakDay.query.filter_by(streak_id=streak.id, day=today).first()
+    if day is None:
+        day = FriendStreakDay(streak_id=streak.id, day=today)
+        db.session.add(day)
+    if sender_id == a_id:
+        day.user_a_sent = True
+    else:
+        day.user_b_sent = True
+    if day.user_a_sent and day.user_b_sent and not day.completed:
+        streak.current_count = (streak.current_count + 1
+                                if streak.last_completed_on == today - timedelta(days=1) else 1)
+        streak.best_count = max(streak.best_count, streak.current_count)
+        streak.last_completed_on = today
+        day.completed = True
+    streak.updated_at = now
+    db.session.commit()
+    for uid, peer in ((sender_id, receiver_id), (receiver_id, sender_id)):
+        socketio.emit("friend_streak_update", friend_streak_payload(uid, peer, now), to=f"user_{uid}")
+    return friend_streak_payload(sender_id, receiver_id, now)
+
+
+def friend_streaks_for_user(user_id, peer_ids, now=None):
+    now = now or utcnow()
+    result = {}
+    for peer_id in peer_ids:
+        result[peer_id] = friend_streak_payload(user_id, peer_id, now)
+    return result
 
 
 def can_view_feed_post(viewer_id, post):
@@ -464,6 +670,9 @@ def can_view_feed_post(viewer_id, post):
         return are_friends(viewer_id, post.user_id)
     if audience == "selected":
         return FeedPostAudience.query.filter_by(post_id=post.id, user_id=viewer_id).first() is not None
+    if audience == "group":
+        relation = FeedPostGroup.query.filter_by(post_id=post.id).first()
+        return bool(relation and is_group_member(viewer_id, relation.group_id))
     return False
 
 
@@ -620,7 +829,39 @@ def current_unread_count():
         return 0
     now = utcnow()
     available = (Message.expires_at.is_(None) | (Message.expires_at > now))
-    return Message.query.filter_by(receiver_id=uid, read_at=None).filter(available).count()
+    direct = Message.query.filter_by(receiver_id=uid, read_at=None).filter(available).count()
+    group_memberships = ChatGroupMember.query.filter_by(user_id=uid).all()
+    return direct + sum(group_unread_count(uid, row.group_id) for row in group_memberships)
+
+
+def is_group_member(user_id, group_id):
+    return bool(user_id is not None and group_id is not None and
+                ChatGroupMember.query.filter_by(user_id=user_id, group_id=group_id).first())
+
+
+def group_unread_count(user_id, group_id):
+    if not is_group_member(user_id, group_id):
+        return 0
+    read_ids = db.session.query(GroupMessageRead.message_id).filter_by(user_id=user_id)
+    return GroupMessage.query.filter(
+        GroupMessage.group_id == group_id,
+        GroupMessage.sender_id != user_id,
+        GroupMessage.expires_at.is_(None) | (GroupMessage.expires_at > utcnow()),
+        ~GroupMessage.id.in_(read_ids),
+    ).count()
+
+
+def group_unread_total(user_id):
+    memberships = ChatGroupMember.query.filter_by(user_id=user_id).all()
+    return sum(group_unread_count(user_id, item.group_id) for item in memberships)
+
+
+def emit_group_unread_count(user_id, group_id):
+    socketio.emit("unread_count_update", {
+        "total": unread_count_for(user_id) + group_unread_total(user_id),
+        "group_id": group_id,
+        "conversation": group_unread_count(user_id, group_id),
+    }, to=f"user_{user_id}")
 
 
 def room(a, b):
@@ -642,7 +883,7 @@ def unread_count_for(user_id, peer_id=None):
 
 def emit_unread_count(user_id, peer_id=None):
     socketio.emit("unread_count_update", {
-        "total": unread_count_for(user_id),
+        "total": unread_count_for(user_id) + group_unread_total(user_id),
         "peer_id": peer_id,
         "conversation": unread_count_for(user_id, peer_id) if peer_id is not None else None,
     }, to=f"user_{user_id}")
@@ -689,7 +930,20 @@ def valid_email(value):
 
 
 def valid_username(value):
-    return bool(value and re.fullmatch(r"[A-Za-z0-9_.]{3,50}", value))
+    return bool(value and re.fullmatch(r"[A-Za-z0-9]{3,50}", value))
+
+
+def username_suggestions(value, exclude_id=None):
+    base = re.sub(r"[^A-Za-z0-9_.]", "", (value or "").strip()) or "friend"
+    base = base[:42]
+    suggestions = []
+    for suffix in ("1", "2", "3", "_", ".", "_1", ".1", "2026"):
+        candidate = (base + suffix)[:50]
+        if candidate.lower() != (value or "").lower() and not username_taken(candidate, exclude_id) and candidate not in suggestions:
+            suggestions.append(candidate)
+        if len(suggestions) == 4:
+            break
+    return suggestions
 
 
 def username_taken(value, exclude_id=None):
@@ -778,6 +1032,7 @@ def home():
              if can_view_feed_post(uid, post)]
     friend_ids = get_friends(uid)
     feed_friends = User.query.filter(User.id.in_(friend_ids)).order_by(User.username).all() if friend_ids else []
+    feed_groups = groups_for_user(uid)
     feed_items = []
     feed_reaction_options = [
         ("love", "Love", "❤️"), ("like", "Like", "👍"), ("funny", "Funny", "😂"),
@@ -817,12 +1072,18 @@ def home():
                 if reactor:
                     reaction_people[key].append(reactor.username)
         mine = next((item.reaction for item in reactions if item.user_id == uid), None)
+        group_relation = FeedPostGroup.query.filter_by(post_id=post.id).first() if post.audience == "group" else None
+        post_group = db.session.get(ChatGroup, group_relation.group_id) if group_relation else None
+        audience_labels = {"public": "Public", "friends": "Friends", "private": "Only me", "selected": "Selected people"}
+        if post_group:
+            audience_labels["group"] = f"Group: {post_group.name}"
         feed_items.append({
             "post": post, "author": author, "comments": comment_items,
             "media_items": media_items,
             "audience": post.audience or "friends",
             "selected_user_ids": [row.user_id for row in FeedPostAudience.query.filter_by(post_id=post.id).all()],
-            "audience_label": {"public": "Public", "friends": "Friends", "private": "Only me", "selected": "Selected people"}.get(post.audience or "friends", "Friends"),
+            "selected_group_id": group_relation.group_id if group_relation else None,
+            "audience_label": audience_labels.get(post.audience or "friends", "Friends"),
             "reaction_counts": reaction_counts,
             "reaction_people": reaction_people,
             "reaction_total": sum(reaction_counts.values()),
@@ -830,7 +1091,8 @@ def home():
         })
     current_user = db.session.get(User, uid)
     return render_template("home.html", feed_items=feed_items, current_user=current_user,
-                           feed_reaction_options=feed_reaction_options, feed_friends=feed_friends)
+                           feed_reaction_options=feed_reaction_options, feed_friends=feed_friends,
+                           feed_groups=feed_groups)
 
 
 @app.route("/conversations/search")
@@ -840,7 +1102,7 @@ def search_conversation_messages():
     uid = session["user_id"]
     query = (request.args.get("q") or "").strip()[:100]
     if not query:
-        return jsonify({"peer_ids": []})
+        return jsonify({"peer_ids": [], "group_ids": []})
     # Escape SQL LIKE metacharacters so searches are literal.
     escaped = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
     matches = Message.query.filter(
@@ -853,7 +1115,13 @@ def search_conversation_messages():
         peer_id = message.receiver_id if message.sender_id == uid else message.sender_id
         if can_message(uid, peer_id) or can_message(peer_id, uid):
             peer_ids.add(peer_id)
-    return jsonify({"peer_ids": list(peer_ids)})
+    group_matches = GroupMessage.query.filter(
+        GroupMessage.content.ilike(f"%{escaped}%", escape="\\"),
+        GroupMessage.expires_at.is_(None) | (GroupMessage.expires_at > utcnow()),
+        GroupMessage.group_id.in_(db.session.query(ChatGroupMember.group_id).filter_by(user_id=uid)),
+    ).order_by(GroupMessage.created_at.desc()).limit(250).all()
+    group_ids = {message.group_id for message in group_matches}
+    return jsonify({"peer_ids": list(peer_ids), "group_ids": list(group_ids)})
 
 
 @app.route("/chat/<int:fid>/archive", methods=["POST"])
@@ -876,7 +1144,7 @@ def archive_conversation(fid):
     else:
         abort(400)
     db.session.commit()
-    return redirect("/friends?filter=archived" if action == "archive" else "/friends")
+    return redirect("/friends?filter=tucked-away" if action == "archive" else "/friends")
 
 
 def save_social_media(file, folder):
@@ -920,10 +1188,15 @@ def create_feed_post():
         return redirect("/")
     uid = session["user_id"]
     audience = request.form.get("audience", "friends")
-    if audience not in {"public", "friends", "private", "selected"}:
+    if audience not in {"public", "friends", "private", "selected", "group"}:
         flash("Choose a valid audience for your post", "error")
         return redirect("/")
     selected_ids, selection_error = selected_feed_audience_ids(uid, request.form.getlist("selected_user_ids"))
+    selected_group_id = request.form.get("group_id", type=int)
+    selected_group = db.session.get(ChatGroup, selected_group_id) if selected_group_id else None
+    if audience == "group" and (not selected_group or not is_group_member(uid, selected_group.id)):
+        flash("Choose one of your groups for this post", "error")
+        return redirect("/")
     if selection_error or (audience == "selected" and not selected_ids):
         flash(selection_error or "Choose at least one friend for this post", "error")
         return redirect("/")
@@ -952,6 +1225,8 @@ def create_feed_post():
     db.session.add(post)
     db.session.flush()
     db.session.add_all(FeedPostAudience(post_id=post.id, user_id=person_id) for person_id in selected_ids)
+    if audience == "group" and selected_group:
+        db.session.add(FeedPostGroup(post_id=post.id, group_id=selected_group.id))
     if len(saved_media) > 1:
         db.session.add_all(
             PostMedia(post_id=post.id, media_url=media_url, media_type=media_type, position=position)
@@ -1038,6 +1313,14 @@ def selected_feed_audience_ids(owner_id, raw_ids):
     return sorted(selected), None
 
 
+def selected_feed_group_id(owner_id, raw_group_id):
+    try:
+        group_id = int(raw_group_id)
+    except (TypeError, ValueError):
+        return None
+    return group_id if is_group_member(owner_id, group_id) else None
+
+
 @app.route("/posts/<int:post_id>/audience", methods=["POST"])
 def update_feed_post_audience(post_id):
     if "user_id" not in session:
@@ -1047,14 +1330,21 @@ def update_feed_post_audience(post_id):
     if post is None or post.user_id != uid:
         abort(404)
     audience = request.form.get("audience", "friends")
-    if audience not in {"public", "friends", "private", "selected"}:
+    if audience not in {"public", "friends", "private", "selected", "group"}:
         abort(400)
     selected_ids, error = selected_feed_audience_ids(uid, request.form.getlist("selected_user_ids"))
+    group_id = selected_feed_group_id(uid, request.form.get("group_id")) if audience == "group" else None
+    if audience == "group" and group_id is None:
+        flash("Choose one of your groups for this post", "error")
+        return redirect("/#post-" + str(post_id))
     if error or (audience == "selected" and not selected_ids):
         flash(error or "Choose at least one friend for this post", "error")
         return redirect("/#post-" + str(post_id))
     FeedPostAudience.query.filter_by(post_id=post_id).delete(synchronize_session=False)
+    FeedPostGroup.query.filter_by(post_id=post_id).delete(synchronize_session=False)
     db.session.add_all(FeedPostAudience(post_id=post.id, user_id=person_id) for person_id in selected_ids)
+    if audience == "group":
+        db.session.add(FeedPostGroup(post_id=post.id, group_id=group_id))
     post.audience = audience
     db.session.commit()
     flash("Post audience updated", "success")
@@ -1145,6 +1435,7 @@ def delete_feed_post(post_id):
             attachment_urls.append(post.media_url)
         PostMedia.query.filter_by(post_id=post_id).delete(synchronize_session=False)
         FeedPostAudience.query.filter_by(post_id=post_id).delete(synchronize_session=False)
+        FeedPostGroup.query.filter_by(post_id=post_id).delete(synchronize_session=False)
         FeedComment.query.filter_by(post_id=post_id).delete()
         FeedReaction.query.filter_by(post_id=post_id).delete()
         db.session.delete(post)
@@ -1162,7 +1453,7 @@ def signup():
         password = request.form.get("password") or ""
 
         if not valid_username(username) or not email or not password:
-            flash("Choose a username using 3–50 letters, numbers, dots, or underscores, and provide your email and password.", "error")
+            flash("Choose a username using 3–50 letters and numbers, and provide your email and password.", "error")
             return redirect("/signup")
 
         if len(password) > 8:
@@ -1178,8 +1469,8 @@ def signup():
             return redirect("/signup")
 
         if username_taken(username):
-            flash("That username is already taken. Choose another one.", "error")
-            return redirect("/signup")
+            flash("That username is already taken. Try an available suggestion or choose another.", "error")
+            return render_template("signup.html", username_suggestions=username_suggestions(username))
 
         if db.session.query(User.id).filter(func.lower(User.email) == email).first():
             flash("An account already uses that email address", "error")
@@ -1281,9 +1572,10 @@ def username_setup():
     if request.method == "POST":
         username = (request.form.get("username") or "").strip()
         if not valid_username(username):
-            flash("Choose a username using 3–50 letters, numbers, dots, or underscores.", "error")
+            flash("Choose a username using 3–50 letters and numbers.", "error")
         elif username_taken(username, exclude_id=user.id):
-            flash("That username is already taken. Choose another one.", "error")
+            flash("That username is already taken. Try an available suggestion or choose another.", "error")
+            return render_template("username_setup.html", username_suggestions=username_suggestions(username, user.id))
         else:
             user.username = username
             try:
@@ -1394,6 +1686,7 @@ def friends():
 
     uid = session["user_id"]
     ids = get_friends(uid)
+    streak_map = friend_streaks_for_user(uid, ids, utcnow())
     message_peer_ids = {row[0] for row in db.session.query(Message.sender_id).filter_by(receiver_id=uid).all()}
     message_peer_ids.update(row[0] for row in db.session.query(Message.receiver_id).filter_by(sender_id=uid).all())
     archive_rows = ConversationArchive.query.filter_by(user_id=uid).all()
@@ -1419,13 +1712,15 @@ def friends():
         else:
             timestamp = latest.timestamp
             if latest.message_type == "image":
-                preview = "Sent you a photo 📷" if latest.sender_id != uid else "You sent a photo 📷"
+                preview = f"{friend.username} sent a photo 📷" if latest.sender_id != uid else "You sent a photo 📷"
             elif latest.message_type == "video":
-                preview = "Sent you a video 🎥" if latest.sender_id != uid else "You sent a video 🎥"
+                preview = f"{friend.username} sent a video 🎥" if latest.sender_id != uid else "You sent a video 🎥"
             elif latest.message_type == "audio":
-                preview = "Sent a voice message 🎙️" if latest.sender_id != uid else "You sent a voice message 🎙️"
+                preview = f"{friend.username} sent a voice message 🎙️" if latest.sender_id != uid else "You sent a voice message 🎙️"
             elif latest.message_type == "sticker":
-                preview = "Sent a sticker ✨" if latest.sender_id != uid else "You sent a sticker ✨"
+                preview = f"{friend.username} sent a sticker ✨" if latest.sender_id != uid else "You sent a sticker ✨"
+            elif latest.message_type == "poll":
+                preview = "You created a poll 📊" if latest.sender_id == uid else f"{friend.username} created a poll 📊"
             else:
                 preview = ("You: " if latest.sender_id == uid else "") + latest.content
             if timestamp and timestamp.date() == now.date():
@@ -1437,9 +1732,32 @@ def friends():
             else:
                 time_label = ""
         conversations.append({
-            "friend": friend, "preview": preview, "timestamp": timestamp,
+            "kind": "direct", "friend": friend, "preview": preview, "timestamp": timestamp,
             "time_label": time_label, "unread_count": unread_count,
-            "archived": friend.id in archived_ids,
+            "archived": friend.id in archived_ids, "streak": streak_map.get(friend.id),
+        })
+    for membership in ChatGroupMember.query.filter_by(user_id=uid).all():
+        group = db.session.get(ChatGroup, membership.group_id)
+        if not group:
+            continue
+        latest = GroupMessage.query.filter_by(group_id=group.id).filter(
+            GroupMessage.expires_at.is_(None) | (GroupMessage.expires_at > now)
+        ).order_by(GroupMessage.created_at.desc(), GroupMessage.id.desc()).first()
+        timestamp = latest.created_at if latest else group.created_at
+        sender = db.session.get(User, latest.sender_id) if latest else None
+        preview = (("You: " if latest and latest.sender_id == uid else f"{sender.username}: " if sender else "")
+                   + latest.content) if latest else "Group conversation created"
+        if timestamp and timestamp.date() == now.date():
+            time_label = timestamp.strftime("%H:%M")
+        elif timestamp and timestamp.date() == (now - timedelta(days=1)).date():
+            time_label = "Yesterday"
+        else:
+            time_label = timestamp.strftime("%A") if timestamp else ""
+        archived = GroupArchive.query.filter_by(group_id=group.id, user_id=uid).first() is not None
+        conversations.append({
+            "kind": "group", "group": group, "preview": preview, "timestamp": timestamp,
+            "time_label": time_label, "unread_count": group_unread_count(uid, group.id),
+            "archived": archived,
         })
     conversations.sort(key=lambda item: item["timestamp"] or datetime.min, reverse=True)
 
@@ -1457,8 +1775,8 @@ def people_directory_context(uid):
         User.id != uid,
         or_(User.discoverable_by_email.is_(True), User.discoverable_by_email.is_(None)),
     ).order_by(User.username).all() if account.id not in hidden_account_ids]
-    discover_accounts = [account for account in accounts if account.id not in set(ids)]
-    incoming_adds = Friendship.query.filter_by(friend_id=uid, status="pending").all()
+    incoming_adds = [row for row in Friendship.query.filter_by(friend_id=uid, status="pending").all()
+                     if not is_blocked(uid, row.user_id)]
     incoming_ids = [row.user_id for row in incoming_adds]
     incoming_people = User.query.filter(User.id.in_(incoming_ids)).all() if incoming_ids else []
     incoming_requests = [
@@ -1467,10 +1785,28 @@ def people_directory_context(uid):
         for person in incoming_people
         if person.id == row.user_id
     ]
-    outgoing_ids = {
-        row.friend_id for row in Friendship.query.filter_by(user_id=uid, status="pending").all()
-    }
+    outgoing_adds = [row for row in Friendship.query.filter_by(user_id=uid, status="pending").all()
+                     if not is_blocked(uid, row.friend_id)]
+    outgoing_ids = {row.friend_id for row in outgoing_adds}
+    pending_ids = set(incoming_ids) | outgoing_ids
+    discover_accounts = [account for account in accounts
+                         if account.id not in set(ids) and account.id not in pending_ids]
+    outgoing_ids_to_load = list(outgoing_ids)
+    outgoing_people = {person.id: person for person in User.query.filter(User.id.in_(outgoing_ids_to_load)).all()} if outgoing_ids_to_load else {}
+    outgoing_requests = [{"id": row.id, "person": outgoing_people[row.friend_id], "status": "Pending"}
+                         for row in outgoing_adds if row.friend_id in outgoing_people]
+    group_memberships = ChatGroupMember.query.filter_by(user_id=uid).all()
+    my_groups = [db.session.get(ChatGroup, row.group_id) for row in group_memberships]
+    my_groups = [item for item in my_groups if item]
     incoming_request_by_user = {row.user_id: row.id for row in incoming_adds}
+    online_users = visible_online_user_ids(uid)
+    activity_by_user = {
+        person.id: (activity_label(person, person.id in online_users)
+                    if person.show_last_seen is not False else ("Active now" if person.id in online_users else "Offline"))
+        for person in people_friends
+    }
+    streak_map = friend_streaks_for_user(uid, ids)
+    streak_items = [{"friend": person, **streak_map[person.id]} for person in people_friends]
     return {
         "friends": people_friends,
         "accounts": accounts,
@@ -1479,7 +1815,12 @@ def people_directory_context(uid):
         "incoming_requests": incoming_requests,
         "incoming_request_by_user": incoming_request_by_user,
         "outgoing_ids": outgoing_ids,
-        "online_users": visible_online_user_ids(uid),
+        "outgoing_requests": outgoing_requests,
+        "activity_by_user": activity_by_user,
+        "streak_map": streak_map,
+        "streak_items": streak_items,
+        "my_groups": my_groups,
+        "online_users": online_users,
     }
 
 
@@ -1487,32 +1828,170 @@ def people_directory_context(uid):
 def people():
     if "user_id" not in session:
         return redirect("/login")
+    active_tab = request.args.get("tab", "friends")
+    if active_tab not in {"requests", "discover", "friends", "streaks"}:
+        active_tab = "friends"
     return render_template(
         "friends.html", **people_directory_context(session["user_id"]),
-        active_people_tab="friends",
+        active_people_tab=active_tab,
     )
 
 
+@app.post("/groups")
+def create_chat_group():
+    if "user_id" not in session:
+        return redirect("/login")
+    uid = session["user_id"]
+    name = (request.form.get("name") or "").strip()
+    if not name or len(name) > 80:
+        flash("Group names must be 1–80 characters", "error")
+        return redirect("/people")
+    friend_ids = set(get_friends(uid))
+    selected = set()
+    for raw_id in request.form.getlist("member_ids"):
+        try:
+            member_id = int(raw_id)
+        except (TypeError, ValueError):
+            flash("Choose valid friends for the group", "error")
+            return redirect("/people")
+        if member_id not in friend_ids or is_blocked(uid, member_id):
+            flash("Groups can include your accepted friends only", "error")
+            return redirect("/people")
+        selected.add(member_id)
+    if not selected:
+        flash("Choose at least one friend to start a group", "error")
+        return redirect("/people")
+    group = ChatGroup(name=name, owner_id=uid)
+    db.session.add(group)
+    db.session.flush()
+    db.session.add(ChatGroupMember(group_id=group.id, user_id=uid, role="owner"))
+    db.session.add_all(ChatGroupMember(group_id=group.id, user_id=member_id) for member_id in selected)
+    db.session.commit()
+    flash(f"Group {name} created", "success")
+    return redirect(url_for("group_chat", group_id=group.id))
+
+
+@app.post("/groups/<int:group_id>/members")
+def add_chat_group_member(group_id):
+    if "user_id" not in session:
+        return redirect("/login")
+    uid = session["user_id"]
+    group = db.session.get(ChatGroup, group_id)
+    if not group or group.owner_id != uid or not is_group_member(uid, group_id):
+        abort(404)
+    member_id = request.form.get("user_id", type=int)
+    if not member_id or member_id not in set(get_friends(uid)) or is_blocked(uid, member_id):
+        flash("Choose one of your accepted friends", "error")
+    elif is_group_member(member_id, group_id):
+        flash("That person is already in the group", "error")
+    else:
+        db.session.add(ChatGroupMember(group_id=group_id, user_id=member_id))
+        db.session.commit()
+        flash("Friend added to the group", "success")
+    return redirect(url_for("group_chat", group_id=group_id))
+
+
+@app.post("/groups/<int:group_id>/leave")
+def leave_chat_group(group_id):
+    if "user_id" not in session:
+        return redirect("/login")
+    uid = session["user_id"]
+    membership = ChatGroupMember.query.filter_by(group_id=group_id, user_id=uid).first_or_404()
+    group = db.session.get(ChatGroup, group_id)
+    members = ChatGroupMember.query.filter_by(group_id=group_id).order_by(ChatGroupMember.joined_at, ChatGroupMember.id).all()
+    db.session.delete(membership)
+    if group and group.owner_id == uid:
+        next_owner = next((item for item in members if item.user_id != uid), None)
+        if next_owner:
+            group.owner_id = next_owner.user_id
+            next_owner.role = "owner"
+    db.session.commit()
+    flash("You left the group", "success")
+    return redirect("/friends")
+
+
+@app.route("/groups/<int:group_id>")
+def group_chat(group_id):
+    if "user_id" not in session:
+        return redirect("/login")
+    uid = session["user_id"]
+    group = db.session.get(ChatGroup, group_id)
+    if not group or not is_group_member(uid, group_id):
+        abort(404)
+    members = ChatGroupMember.query.filter_by(group_id=group_id).order_by(ChatGroupMember.joined_at).all()
+    people = {person.id: person for person in User.query.filter(
+        User.id.in_([item.user_id for item in members])
+    ).all()}
+    available = GroupMessage.expires_at.is_(None) | (GroupMessage.expires_at > utcnow())
+    messages = GroupMessage.query.filter_by(group_id=group_id).filter(available).order_by(GroupMessage.id).all()
+    read_rows = GroupMessageRead.query.filter(
+        GroupMessageRead.user_id == uid,
+        GroupMessageRead.message_id.in_([item.id for item in messages] or [-1]),
+    ).all()
+    read_ids = {item.message_id for item in read_rows}
+    member_choices = User.query.filter(User.id.in_(get_friends(uid)), User.id.notin_([item.user_id for item in members])).order_by(User.username).all() if get_friends(uid) else []
+    archive = GroupArchive.query.filter_by(group_id=group_id, user_id=uid).first()
+    return render_template(
+        "group_chat.html", group=group, group_members=[people[item.user_id] for item in members if item.user_id in people],
+        group_memberships=members, messages=messages, read_ids=read_ids, current_user_id=uid,
+        group_unread=group_unread_count(uid, group_id), is_group_owner=group.owner_id == uid,
+        member_choices=member_choices, archived=bool(archive),
+    )
+
+
+@app.post("/groups/<int:group_id>/archive")
+def archive_chat_group(group_id):
+    if "user_id" not in session:
+        return redirect("/login")
+    uid = session["user_id"]
+    if not is_group_member(uid, group_id):
+        abort(404)
+    action = request.form.get("action", "archive")
+    row = GroupArchive.query.filter_by(group_id=group_id, user_id=uid).first()
+    if action == "archive" and row is None:
+        db.session.add(GroupArchive(group_id=group_id, user_id=uid))
+    elif action == "unarchive" and row:
+        db.session.delete(row)
+    elif action not in {"archive", "unarchive"}:
+        abort(400)
+    db.session.commit()
+    return redirect("/friends?filter=tucked-away" if action == "archive" else "/friends")
+
+
 @app.route("/people/search", methods=["POST"])
-def search_people_by_email():
-    """Find one discoverable account by its exact registered email, without returning that email."""
+def search_people():
+    """Find one discoverable account by exact username or registered email, without returning email."""
+    def private_search_response(status, **payload):
+        response = jsonify(**payload)
+        response.status_code = status
+        response.headers["Cache-Control"] = "no-store"
+        response.headers["Vary"] = "Cookie"
+        return response
+
     uid = session.get("user_id")
     if uid is None:
-        return jsonify(ok=False, error="Please sign in to search for people."), 401
+        return private_search_response(401, ok=False, error="Please sign in to search for people.")
 
     data = request.get_json(silent=True) or request.form
-    email = (data.get("email") or "").strip().lower()
-    if not valid_email(email):
-        return jsonify(ok=False, error="Enter a valid email address."), 400
+    query = (data.get("query") or data.get("email") or "").strip()
+    if not query or len(query) > 254:
+        return private_search_response(400, ok=False, error="Enter a username or email address to search.")
 
-    matches = User.query.filter(func.lower(User.email) == email).limit(2).all()
+    if "@" in query:
+        if not valid_email(query):
+            return private_search_response(400, ok=False, error="Enter a valid email address or username.")
+        matches = User.query.filter(func.lower(User.email) == query.lower()).limit(2).all()
+    else:
+        # Search exact legacy usernames too; older accounts may predate the
+        # current username format rules.
+        matches = User.query.filter(func.lower(User.username) == query.lower()).limit(2).all()
     if len(matches) != 1:
-        return jsonify(ok=False, error="No discoverable account matched that email address."), 404
+        return private_search_response(404, ok=False, error="No matching people found. Check the username or email and try again.")
     person = matches[0]
     if person.id == uid:
-        return jsonify(ok=False, error="You cannot add yourself as a friend."), 400
+        return private_search_response(400, ok=False, error="That is your account. Search for someone else.")
     if person.discoverable_by_email is False or is_blocked(uid, person.id):
-        return jsonify(ok=False, error="No discoverable account matched that email address."), 404
+        return private_search_response(404, ok=False, error="No matching people found. Check the username or email and try again.")
 
     existing = Friendship.query.filter(
         ((Friendship.user_id == uid) & (Friendship.friend_id == person.id)) |
@@ -1524,7 +2003,7 @@ def search_people_by_email():
     elif existing and existing.status == "pending":
         state = "request_sent" if existing.user_id == uid else "request_received"
 
-    response = jsonify(
+    return private_search_response(200,
         ok=True,
         person={
             "id": person.id,
@@ -1533,9 +2012,6 @@ def search_people_by_email():
             "state": state,
         },
     )
-    response.headers["Cache-Control"] = "no-store"
-    response.headers["Vary"] = "Cookie"
-    return response
 
 
 @app.route("/explore")
@@ -1547,7 +2023,8 @@ def explore():
 
 def friend_action_redirect():
     destination = request.form.get("return_to", "/friends")
-    if destination not in {"/people", "/friends"}:
+    if destination not in {"/people", "/friends", "/people#requests-panel", "/people#discover-panel",
+                           "/people#friends-panel", "/people#streaks-panel"} and not re.fullmatch(r"/(chat|profile)/\d+", destination):
         destination = "/friends"
     return redirect(destination)
 
@@ -1558,13 +2035,18 @@ def add_friend():
         return redirect("/login")
 
     uid = session["user_id"]
-    email = (request.form.get("email") or "").strip().lower()
-    if not valid_email(email):
-        flash("Enter a valid email address", "error")
-        return friend_action_redirect()
-
-    matching_accounts = User.query.filter(func.lower(User.email) == email).limit(2).all()
-    other = matching_accounts[0] if len(matching_accounts) == 1 else None
+    target_id = request.form.get("user_id", type=int)
+    query = (request.form.get("query") or request.form.get("email") or "").strip()
+    if target_id:
+        other = db.session.get(User, target_id)
+    elif "@" in query and valid_email(query):
+        matches = User.query.filter(func.lower(User.email) == query.lower()).limit(2).all()
+        other = matches[0] if len(matches) == 1 else None
+    elif query:
+        matches = User.query.filter(func.lower(User.username) == query.lower()).limit(2).all()
+        other = matches[0] if len(matches) == 1 else None
+    else:
+        other = None
     existing = None
     if other is not None and other.id != uid:
         existing = Friendship.query.filter(
@@ -1575,7 +2057,7 @@ def add_friend():
     if other is not None and other.id == uid:
         flash("You cannot add yourself", "error")
     elif other is None or other.discoverable_by_email is False or is_blocked(uid, other.id):
-        flash("No discoverable account matched that email address", "error")
+        flash("No matching people found. Check the username or email and try again.", "error")
     elif are_friends(uid, other.id):
         flash(f"{other.username} is already a friend", "error")
     elif existing and existing.status == "pending":
@@ -1585,8 +2067,13 @@ def add_friend():
             flash(f"{other.username} already sent you a request. Accept it on this page.", "error")
     else:
         db.session.add(Friendship(user_id=uid, friend_id=other.id, status="pending"))
-        db.session.commit()
-        flash(f"Friend request sent to {other.username}", "success")
+        try:
+            db.session.commit()
+            flash(f"Friend request sent to {other.username}", "success")
+            socketio.emit("friendship_updated", {"other_user_id": uid}, to=f"user_{other.id}")
+        except IntegrityError:
+            db.session.rollback()
+            flash(f"A friend request or friendship with {other.username} already exists.", "error")
 
     return friend_action_redirect()
 
@@ -1611,6 +2098,7 @@ def respond_friend_request(request_id, action):
         flash("Friend request declined", "success")
     db.session.commit()
     emit_pending_message_status(requester_id, recipient_id)
+    socketio.emit("friendship_updated", {"other_user_id": recipient_id, "action": action}, to=f"user_{requester_id}")
     return friend_action_redirect()
 
 
@@ -1632,6 +2120,7 @@ def remove_friend(fid):
         flash("Friend removed", "success")
         for sender_id, receiver_id in pending_senders:
             emit_pending_message_status(sender_id, receiver_id)
+        socketio.emit("friendship_updated", {"other_user_id": uid, "action": "removed"}, to=f"user_{fid}")
     return friend_action_redirect()
 
 
@@ -2063,6 +2552,7 @@ def reply_to_status(status_id):
     recipient_is_viewing = mark_message_delivery(message, status.user_id, recipient, room_name, now)
     db.session.add(message)
     db.session.commit()
+    record_friend_streak_message(uid, status.user_id, now)
     if remaining is not None:
         emit_pending_message_status(uid, status.user_id)
     payload = {"id": message.id, "content": message.content, "message_type": "text",
@@ -2075,6 +2565,7 @@ def reply_to_status(status_id):
                                   "message_id": message.id, "is_unread": message.read_at is None,
                                   "content": content, "message_type": "text"})
     if recipient_is_viewing and retention == "seen":
+        delete_chat_poll_for_message(message)
         db.session.delete(message)
         db.session.commit()
         socketio.emit("message_deleted", {"id": message.id}, room=room_name)
@@ -2118,11 +2609,53 @@ def profile(user_id=None):
         abort(404)
     if not is_owner and is_blocked(current_id, target_id):
         abort(404)
-    if not is_owner and not are_friends(current_id, target_id):
-        abort(403)
+    if not is_owner and UserBlock.query.filter_by(blocker_id=target_id, blocked_id=current_id).first():
+        abort(404)
+    viewer_blocked_target = bool(not is_owner and UserBlock.query.filter_by(
+        blocker_id=current_id, blocked_id=target_id
+    ).first())
+    relationship = Friendship.query.filter(
+        ((Friendship.user_id == current_id) & (Friendship.friend_id == target_id)) |
+        ((Friendship.user_id == target_id) & (Friendship.friend_id == current_id))
+    ).first() if not is_owner else None
+    if viewer_blocked_target:
+        profile_relationship = "blocked_by_me"
+    elif relationship and (relationship.status is None or relationship.status == "accepted"):
+        profile_relationship = "friends"
+    elif relationship and relationship.status == "pending":
+        profile_relationship = "request_sent" if relationship.user_id == current_id else "request_received"
+    else:
+        profile_relationship = "none"
     back_chat_id = request.args.get("from_chat", type=int)
     if back_chat_id != target_id or not are_friends(current_id, target_id):
         back_chat_id = None
+    can_view_friend_list = is_owner or user.show_friends is not False
+    profile_friend_ids = get_friends(target_id) if can_view_friend_list else []
+    profile_friends = User.query.filter(User.id.in_(profile_friend_ids)).order_by(User.username).all() if profile_friend_ids else []
+    mutual_ids = set(profile_friend_ids).intersection(get_friends(current_id)) if not is_owner else set()
+    mutual_friends = User.query.filter(User.id.in_(mutual_ids)).order_by(User.username).all() if mutual_ids else []
+    shared_messages = []
+    shared_media = {"photos": [], "videos": [], "documents": [], "links": []}
+    message_query = (request.args.get("q") or "").strip()[:100]
+    profile_chat_theme = None
+    if back_chat_id:
+        theme_preference = ChatPreference.query.filter_by(user_id=current_id, friend_id=target_id).first()
+        profile_chat_theme = theme_preference.theme if theme_preference and theme_preference.theme in CHAT_THEMES else None
+        pair = (((Message.sender_id == current_id) & (Message.receiver_id == target_id)) |
+                ((Message.sender_id == target_id) & (Message.receiver_id == current_id)))
+        message_rows = Message.query.filter(pair).filter(
+            Message.expires_at.is_(None) | (Message.expires_at > utcnow())
+        ).order_by(Message.timestamp.asc(), Message.id.asc()).all()
+        for row in message_rows:
+            if row.message_type == "image":
+                shared_media["photos"].append(row)
+            elif row.message_type == "video":
+                shared_media["videos"].append(row)
+            elif row.message_type == "document":
+                shared_media["documents"].append(row)
+            for url in re.findall(r"https?://[^\s<>]+", row.content or ""):
+                shared_media["links"].append((url.rstrip(".,);"), row))
+        shared_messages = [row for row in message_rows if message_query.lower() in (row.content or "").lower()] if message_query else []
     if request.method == "POST" and not is_owner:
         abort(403)
 
@@ -2164,7 +2697,7 @@ def profile(user_id=None):
         elif not username or len(username) > 50:
             flash("Username must be between 1 and 50 characters", "error")
         elif username != user.username and not valid_username(username):
-            flash("New usernames must use 3–50 letters, numbers, dots, or underscores.", "error")
+            flash("New usernames must use 3–50 letters and numbers.", "error")
         elif username_taken(username, exclude_id=user.id):
             flash("That username is already in use", "error")
         elif len(full_name) > 100:
@@ -2209,7 +2742,14 @@ def profile(user_id=None):
         "profile.html", user=user, is_owner=is_owner,
         online_users=(online_user_ids() if is_owner else visible_online_user_ids(session.get("user_id"))),
         self_is_online=(user.id in online_user_ids()),
-        back_chat_id=back_chat_id, today_iso=date.today().isoformat()
+        back_chat_id=back_chat_id, today_iso=date.today().isoformat(),
+        shared_media=shared_media, shared_messages=shared_messages, message_query=message_query,
+        profile_chat_theme=CHAT_THEMES[profile_chat_theme]["label"] if profile_chat_theme else None,
+        profile_friends=profile_friends, mutual_friends=mutual_friends,
+        can_view_friend_list=can_view_friend_list,
+        profile_relationship=profile_relationship,
+        profile_friend_request_id=relationship.id if relationship and relationship.status == "pending" else None,
+        profile_blocked_by_me=viewer_blocked_target
     )
 
 
@@ -2258,6 +2798,7 @@ def settings():
                 user.allow_messages_from = messages_from
                 user.avatar_visibility = avatar_visibility
                 user.discoverable_by_email = request.form.get("discoverable_by_email") == "on"
+                user.show_friends = request.form.get("show_friends") == "on"
                 user.show_birthday = request.form.get("show_birthday") == "on"
                 db.session.commit()
                 flash("Privacy choices saved.", "success")
@@ -2362,7 +2903,15 @@ def delete_user_account(user):
     for sid in online_sessions.pop(uid, set()):
         socketio.server.disconnect(sid, namespace="/")
 
+    owned_messages = Message.query.filter((Message.sender_id == uid) | (Message.receiver_id == uid)).all()
+    for chat_message in owned_messages:
+        delete_chat_poll_for_message(chat_message)
     Message.query.filter((Message.sender_id == uid) | (Message.receiver_id == uid)).delete(synchronize_session=False)
+    streak_ids = [row.id for row in FriendStreak.query.filter(
+        (FriendStreak.user_a_id == uid) | (FriendStreak.user_b_id == uid)
+    ).all()]
+    FriendStreakDay.query.filter(FriendStreakDay.streak_id.in_(streak_ids) if streak_ids else False).delete(synchronize_session=False)
+    FriendStreak.query.filter((FriendStreak.user_a_id == uid) | (FriendStreak.user_b_id == uid)).delete(synchronize_session=False)
     Friendship.query.filter((Friendship.user_id == uid) | (Friendship.friend_id == uid)).delete(synchronize_session=False)
     UserBlock.query.filter((UserBlock.blocker_id == uid) | (UserBlock.blocked_id == uid)).delete(synchronize_session=False)
     ChatPreference.query.filter((ChatPreference.user_id == uid) | (ChatPreference.friend_id == uid)).delete(synchronize_session=False)
@@ -2443,13 +2992,10 @@ def block_user():
         return redirect("/settings")
     if not UserBlock.query.filter_by(blocker_id=uid, blocked_id=blocked_id).first():
         db.session.add(UserBlock(blocker_id=uid, blocked_id=blocked_id))
-        Friendship.query.filter(
-            ((Friendship.user_id == uid) & (Friendship.friend_id == blocked_id)) |
-            ((Friendship.user_id == blocked_id) & (Friendship.friend_id == uid))
-        ).delete(synchronize_session=False)
         db.session.commit()
+        socketio.emit("friendship_updated", {"other_user_id": uid, "action": "blocked"}, to=f"user_{blocked_id}")
     flash("Account blocked. They can no longer message or find your profile.", "success")
-    return redirect("/settings")
+    return friend_action_redirect()
 
 
 @app.route("/settings/unblock/<int:user_id>", methods=["POST"])
@@ -2460,8 +3006,9 @@ def unblock_user(user_id):
     if row:
         db.session.delete(row)
         db.session.commit()
+        socketio.emit("friendship_updated", {"other_user_id": session["user_id"], "action": "unblocked"}, to=f"user_{user_id}")
         flash("Account unblocked.", "success")
-    return redirect("/settings")
+    return friend_action_redirect()
 
 
 @app.route("/chat/<int:fid>")
@@ -2475,7 +3022,14 @@ def chat(fid):
     if friend is None:
         abort(404)
 
-    if not (can_message(uid, fid) or can_message(fid, uid)):
+    existing_conversation = Message.query.filter(
+        (((Message.sender_id == uid) & (Message.receiver_id == fid)) |
+         ((Message.sender_id == fid) & (Message.receiver_id == uid)))
+    ).first() is not None
+    blocked_by_me = UserBlock.query.filter_by(blocker_id=uid, blocked_id=fid).first() is not None
+    blocked_me = UserBlock.query.filter_by(blocker_id=fid, blocked_id=uid).first() is not None
+    chat_blocked = blocked_by_me or blocked_me
+    if not (can_message(uid, fid) or can_message(fid, uid) or existing_conversation or chat_blocked):
         flash("You are not friends with that user", "error")
         return redirect("/friends")
 
@@ -2487,10 +3041,13 @@ def chat(fid):
         conversation_filter, Message.expires_at.isnot(None), Message.expires_at <= utcnow()
     ).all()
     for message in expired:
+        delete_chat_poll_for_message(message)
         db.session.delete(message)
     if expired:
         db.session.commit()
     messages = Message.query.filter(conversation_filter).order_by(Message.id).all()
+    poll_map = {int(message.content): chat_poll_payload(int(message.content), uid)
+                for message in messages if message.message_type == "poll" and (message.content or "").isdigit()}
 
     ids = get_friends(uid)
     sidebar = User.query.filter(User.id.in_(ids)).all() if ids else []
@@ -2526,6 +3083,8 @@ def chat(fid):
         sticker_preferences=sticker_preferences,
         sticker_map=sticker_map,
         pending_message_remaining=pending_remaining,
+        chat_blocked=chat_blocked, blocked_by_me=blocked_by_me,
+        poll_map=poll_map,
     )
 
 
@@ -2709,6 +3268,158 @@ def update_chat_theme(fid):
     return jsonify(ok=True, theme=theme_name)
 
 
+@app.post("/chat/<int:fid>/photo")
+def send_chat_photo(fid):
+    if "user_id" not in session:
+        return jsonify(ok=False, error="Log in to send a photo"), 401
+    uid = session["user_id"]
+    if not can_message(uid, fid):
+        return jsonify(ok=False, error="Chat unavailable"), 403
+    image = request.files.get("photo")
+    if not image or not image.filename:
+        return jsonify(ok=False, error="Choose a photo first"), 400
+    mime = (image.mimetype or "").lower()
+    signatures = {
+        "image/png": ("png", lambda b: b.startswith(b"\x89PNG\r\n\x1a\n")),
+        "image/jpeg": ("jpg", lambda b: b.startswith(b"\xff\xd8\xff")),
+        "image/gif": ("gif", lambda b: b.startswith((b"GIF87a", b"GIF89a"))),
+        "image/webp": ("webp", lambda b: b.startswith(b"RIFF") and b[8:12] == b"WEBP"),
+    }
+    data = image.read(10 * 1024 * 1024 + 1)
+    if len(data) > 10 * 1024 * 1024 or mime not in signatures or not signatures[mime][1](data):
+        return jsonify(ok=False, error="Choose a valid JPG, PNG, GIF, or WebP photo under 10 MB"), 400
+    reserved, remaining = reserve_pending_message_slot(uid, fid)
+    if not reserved:
+        return jsonify(ok=False, error="This chat cannot accept another message yet"), 403
+    upload_dir = os.path.join(app.instance_path, "uploads", "chats")
+    os.makedirs(upload_dir, exist_ok=True)
+    now = utcnow()
+    recipient = db.session.get(User, fid)
+    room_name = room(uid, fid)
+    viewing = bool(chat_room_viewers.get(room_name, {}).get(fid))
+    retention = db.session.get(User, uid).message_retention or "off"
+    message = Message(sender_id=uid, receiver_id=fid, content="", message_type="image", timestamp=now,
+                      delivered_at=now if viewing or online_sessions.get(fid) else None,
+                      read_at=now if viewing else None,
+                      expires_at=message_expiry(retention, now),
+                      read_receipt_hidden=bool(viewing and recipient and recipient.show_read_receipts is False))
+    db.session.add(message)
+    db.session.flush()
+    filename = f"{message.id}.{signatures[mime][0]}"
+    with open(os.path.join(upload_dir, filename), "wb") as saved:
+        saved.write(data)
+    message.content = f"/chat/media/{message.id}"
+    db.session.commit()
+    record_friend_streak_message(uid, fid, now)
+    payload = {"id": message.id, "content": message.content, "message_type": "image", "sender_id": uid,
+               "receiver_id": fid, "timestamp": now.isoformat() + "Z",
+               "receipt": "seen" if message.read_at and not message.read_receipt_hidden else ("delivered" if message.delivered_at else "sent")}
+    socketio.emit("receive_message", payload, to=room_name)
+    socketio.emit("inbox_message", payload, to=f"user_{fid}")
+    emit_unread_count(uid, fid)
+    emit_unread_count(fid, uid)
+    return jsonify(ok=True, message=payload, remaining=remaining)
+
+
+@app.get("/chat/media/<int:message_id>")
+def serve_chat_media(message_id):
+    if "user_id" not in session:
+        abort(401)
+    message = db.session.get(Message, message_id)
+    uid = session["user_id"]
+    if not message or message.message_type != "image" or uid not in {message.sender_id, message.receiver_id}:
+        abort(404)
+    filename = next((f"{message.id}.{ext}" for ext in ("png", "jpg", "gif", "webp")
+                     if os.path.isfile(os.path.join(app.instance_path, "uploads", "chats", f"{message.id}.{ext}"))), None)
+    if filename is None:
+        abort(404)
+    return send_from_directory(os.path.join(app.instance_path, "uploads", "chats"), filename)
+
+
+def chat_poll_payload(poll_id, viewer_id):
+    poll = db.session.get(ChatPoll, poll_id)
+    if not poll:
+        return None
+    message = db.session.get(Message, poll.message_id)
+    if not message or viewer_id not in {message.sender_id, message.receiver_id}:
+        return None
+    options = ChatPollOption.query.filter_by(poll_id=poll.id).order_by(ChatPollOption.id).all()
+    votes = ChatPollVote.query.filter_by(poll_id=poll.id).all()
+    mine = next((vote.option_id for vote in votes if vote.user_id == viewer_id), None)
+    return {"id": poll.id, "message_id": message.id, "question": poll.question,
+            "options": [{"id": option.id, "label": option.label,
+                         "votes": sum(vote.option_id == option.id for vote in votes)} for option in options],
+            "total": len(votes), "my_vote": mine}
+
+
+@app.post("/chat/<int:fid>/poll")
+def create_chat_poll(fid):
+    if "user_id" not in session:
+        return jsonify(ok=False, error="Log in to create a poll"), 401
+    uid = session["user_id"]
+    if not can_message(uid, fid):
+        return jsonify(ok=False, error="Chat unavailable"), 403
+    data = request.get_json(silent=True) or {}
+    question = (data.get("question") or "").strip()
+    options = list(dict.fromkeys((str(item).strip()[:100] for item in (data.get("options") or []) if str(item).strip())))
+    if not question or len(question) > 200 or not 2 <= len(options) <= 6:
+        return jsonify(ok=False, error="Add a question and 2–6 different answer options"), 400
+    reserved, _remaining = reserve_pending_message_slot(uid, fid)
+    if not reserved:
+        return jsonify(ok=False, error="This chat cannot accept another message yet"), 403
+    now = utcnow()
+    retention = db.session.get(User, uid).message_retention or "off"
+    recipient = db.session.get(User, fid)
+    room_name = room(uid, fid)
+    viewing = bool(chat_room_viewers.get(room_name, {}).get(fid))
+    message = Message(sender_id=uid, receiver_id=fid, content="", message_type="poll", timestamp=now,
+                      delivered_at=now if viewing or online_sessions.get(fid) else None,
+                      read_at=now if viewing else None,
+                      expires_at=message_expiry(retention, now),
+                      read_receipt_hidden=bool(viewing and recipient and recipient.show_read_receipts is False))
+    db.session.add(message)
+    db.session.flush()
+    poll = ChatPoll(message_id=message.id, question=question)
+    db.session.add(poll)
+    db.session.flush()
+    db.session.add_all(ChatPollOption(poll_id=poll.id, label=label) for label in options)
+    message.content = str(poll.id)
+    db.session.commit()
+    record_friend_streak_message(uid, fid, now)
+    payload = {"id": message.id, "sender_id": uid, "receiver_id": fid, "content": message.content,
+               "message_type": "poll", "poll": chat_poll_payload(poll.id, uid),
+               "receipt": "seen" if message.read_at and not message.read_receipt_hidden else ("delivered" if message.delivered_at else "sent")}
+    socketio.emit("receive_message", payload, to=room(uid, fid))
+    socketio.emit("inbox_message", payload, to=f"user_{fid}")
+    emit_unread_count(uid, fid)
+    emit_unread_count(fid, uid)
+    return jsonify(ok=True, poll=payload["poll"])
+
+
+@app.post("/chat/polls/<int:poll_id>/vote")
+def vote_chat_poll(poll_id):
+    if "user_id" not in session:
+        return jsonify(ok=False, error="Log in to vote"), 401
+    uid = session["user_id"]
+    poll = db.session.get(ChatPoll, poll_id)
+    message = db.session.get(Message, poll.message_id) if poll else None
+    if not poll or not message or uid not in {message.sender_id, message.receiver_id}:
+        abort(404)
+    data = request.get_json(silent=True) or {}
+    option = db.session.get(ChatPollOption, data.get("option_id"))
+    if not option or option.poll_id != poll.id:
+        return jsonify(ok=False, error="Choose one of the poll options"), 400
+    vote = ChatPollVote.query.filter_by(poll_id=poll.id, user_id=uid).first()
+    if vote:
+        vote.option_id = option.id
+    else:
+        db.session.add(ChatPollVote(poll_id=poll.id, option_id=option.id, user_id=uid))
+    db.session.commit()
+    payload = chat_poll_payload(poll.id, uid)
+    socketio.emit("poll_update", payload, to=room(message.sender_id, message.receiver_id))
+    return jsonify(ok=True, poll=payload)
+
+
 def expire_messages_loop():
     while True:
         socketio.sleep(30)
@@ -2722,6 +3433,7 @@ def expire_messages_loop():
                     {"id": message.id},
                     to=room(message.sender_id, message.receiver_id),
                 )
+                delete_chat_poll_for_message(message)
                 db.session.delete(message)
             if expired:
                 db.session.commit()
@@ -2809,6 +3521,7 @@ def on_join(data):
             if message.delete_after_seen:
                 delivered_message_ids.append(message.id)
                 seen_message_ids.append(message.id)
+                delete_chat_poll_for_message(message)
                 db.session.delete(message)
             else:
                 message.delivered_at = message.delivered_at or now
@@ -2870,6 +3583,7 @@ def handle_send_message(data):
 
     db.session.add(msg)
     db.session.commit()
+    record_friend_streak_message(uid, fid, now)
     if remaining is not None:
         emit_pending_message_status(uid, fid)
 
@@ -2887,6 +3601,7 @@ def handle_send_message(data):
                        "is_unread": msg.read_at is None, "content": msg.content,
                        "message_type": msg.message_type or "text"})
     if recipient_is_viewing and retention == "seen":
+        delete_chat_poll_for_message(msg)
         db.session.delete(msg)
         db.session.commit()
         emit("message_deleted", {"id": msg.id}, room=room(uid, fid))
@@ -2940,6 +3655,7 @@ def handle_send_sticker(data):
         db.session.add(StickerShare(sticker_id=sticker_id, user_id=fid))
     db.session.add(message)
     db.session.commit()
+    record_friend_streak_message(uid, fid, now)
     if remaining is not None:
         emit_pending_message_status(uid, fid)
     payload = {"id": message.id, "content": message.content, "message_type": "sticker",
@@ -2953,6 +3669,7 @@ def handle_send_sticker(data):
                        "is_unread": message.read_at is None, "content": sticker.name,
                        "message_type": "sticker"})
     if recipient_is_viewing and retention == "seen":
+        delete_chat_poll_for_message(message)
         db.session.delete(message)
         db.session.commit()
         emit("message_deleted", {"id": message.id}, room=room_name)
@@ -3005,6 +3722,7 @@ def handle_delete_message(data):
     if msg is None:
         return {"ok": False}
 
+    delete_chat_poll_for_message(msg)
     db.session.delete(msg)
     db.session.commit()
     emit("message_deleted", {"id": message_id}, room=room(uid, fid))
@@ -3070,6 +3788,7 @@ def handle_forward_message(data):
             db.session.add(StickerShare(sticker_id=forwarded_sticker.id, user_id=target_id))
     db.session.add(forwarded)
     db.session.commit()
+    record_friend_streak_message(uid, target_id, now)
     if remaining is not None:
         emit_pending_message_status(uid, target_id)
 
@@ -3093,6 +3812,7 @@ def handle_forward_message(data):
                              "message_type": forwarded.message_type or "text"})
     if target_is_viewing and retention == "seen":
         forwarded_id = forwarded.id
+        delete_chat_poll_for_message(forwarded)
         db.session.delete(forwarded)
         db.session.commit()
         emit("message_deleted", {"id": forwarded_id}, room=target_room)

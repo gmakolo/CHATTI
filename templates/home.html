@@ -23,11 +23,17 @@
                     <select name="audience" data-audience-select>
                         <option value="public">Public</option><option value="friends" selected>Friends</option>
                         <option value="private">Only me</option><option value="selected">Selected people</option>
+                        {% if feed_groups %}<option value="group">Specific group</option>{% endif %}
                     </select>
                 </label>
                 <label class="feed-selected-users" hidden>Choose friends
                     <select name="selected_user_ids" multiple size="3" aria-label="Choose friends who can see this post">
                         {% for person in feed_friends %}<option value="{{ person.id }}">{{ person.username }}</option>{% endfor %}
+                    </select>
+                </label>
+                <label class="feed-selected-group" hidden>Choose a group
+                    <select name="group_id" aria-label="Choose a group for this post">
+                        {% for group in feed_groups %}<option value="{{ group.id }}">{{ group.name }}</option>{% endfor %}
                     </select>
                 </label>
                 <label class="feed-media-label"><span>＋</span> Add photos or videos<input type="file" name="media_file" multiple accept="image/png,image/jpeg,image/gif,image/webp,video/mp4,video/webm"></label>
@@ -43,16 +49,20 @@
         {% for item in feed_items %}{% set post = item.post %}{% set author = item.author %}
         <article class="feed-post" id="post-{{ post.id }}">
             <header class="feed-post-header"><a class="feed-author" href="/profile/{{ author.id }}"><span class="feed-avatar">{% if can_view_profile_picture(author) %}<img src="/avatar/{{ author.id }}" alt="">{% else %}{{ author.username[0].upper() }}{% endif %}</span><span><strong>{{ author.username }}</strong><time>{{ post.created_at.strftime('%b %d · %H:%M') }} UTC</time></span></a>{% if author.id == current_user.id %}<form method="POST" action="/posts/{{ post.id }}/delete" onsubmit="return confirm('Delete this post?')"><button class="feed-delete" type="submit" aria-label="Delete post">•••</button></form>{% endif %}</header>
-            <div class="feed-audience-row"><span aria-label="Post audience">{% if item.audience == 'public' %}🌐 Public{% elif item.audience == 'private' %}🔒 Only me{% elif item.audience == 'selected' %}👥 Selected people{% else %}♧ Friends{% endif %}</span></div>
+            <div class="feed-audience-row"><span aria-label="Post audience">{% if item.audience == 'public' %}🌐 Public{% elif item.audience == 'private' %}🔒 Only me{% elif item.audience == 'selected' %}👥 Selected people{% elif item.audience == 'group' %}👥 {{ item.audience_label }}{% else %}♧ Friends{% endif %}</span></div>
             {% if author.id == current_user.id %}<details class="feed-audience-edit"><summary>Edit audience</summary><form method="POST" action="/posts/{{ post.id }}/audience" class="feed-audience-form">
                 <label>Who can see this post?<select name="audience" data-audience-select>
                     <option value="public" {% if item.audience == 'public' %}selected{% endif %}>Public</option>
                     <option value="friends" {% if item.audience == 'friends' %}selected{% endif %}>Friends</option>
                     <option value="private" {% if item.audience == 'private' %}selected{% endif %}>Only me</option>
                     <option value="selected" {% if item.audience == 'selected' %}selected{% endif %}>Selected people</option>
+                    {% if feed_groups %}<option value="group" {% if item.audience == 'group' %}selected{% endif %}>Specific group</option>{% endif %}
                 </select></label>
                 <label class="feed-selected-users" {% if item.audience != 'selected' %}hidden{% endif %}>Choose friends<select name="selected_user_ids" multiple size="3" aria-label="Choose friends who can see this post">
                     {% for person in feed_friends %}<option value="{{ person.id }}" {% if person.id in item.selected_user_ids %}selected{% endif %}>{{ person.username }}</option>{% endfor %}
+                </select></label>
+                <label class="feed-selected-group" {% if item.audience != 'group' %}hidden{% endif %}>Choose a group<select name="group_id" aria-label="Choose a group for this post">
+                    {% for group in feed_groups %}<option value="{{ group.id }}" {% if group.id == item.selected_group_id %}selected{% endif %}>{{ group.name }}</option>{% endfor %}
                 </select></label><button type="submit">Save audience</button></form></details>{% endif %}
             {% if post.content %}<p class="feed-post-content">{{ post.content }}</p>{% endif %}
             {% if item.media_items %}<div class="feed-post-media-grid{% if item.media_items|length == 1 %} is-single{% endif %}" data-media-count="{{ item.media_items|length }}">
@@ -106,7 +116,9 @@ document.getElementById("create-post-button").addEventListener("click", () => {
 document.querySelectorAll("[data-audience-select]").forEach((select) => {
     const updateAudienceFields = () => {
         const selected = select.closest("form")?.querySelector(".feed-selected-users");
+        const selectedGroup = select.closest("form")?.querySelector(".feed-selected-group");
         if (selected) selected.hidden = select.value !== "selected";
+        if (selectedGroup) selectedGroup.hidden = select.value !== "group";
     };
     select.addEventListener("change", updateAudienceFields);
     updateAudienceFields();
